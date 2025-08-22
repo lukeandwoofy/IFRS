@@ -26,15 +26,17 @@ export function showAuth() {
     <button id="btn-login">Login</button>
     <button id="btn-signup">Sign Up</button>
   `;
+
   document.getElementById('btn-login').onclick = () => {
-    const email = document.getElementById('email').value;
-    const pass  = document.getElementById('pass').value;
-    auth.signInWithEmailAndPassword(email, pass).catch(e => alert(e.message));
+    auth.signInWithEmailAndPassword(
+      email.value, pass.value
+    ).catch(e => alert(e.message));
   };
+
   document.getElementById('btn-signup').onclick = () => {
-    const email = document.getElementById('email').value;
-    const pass  = document.getElementById('pass').value;
-    auth.createUserWithEmailAndPassword(email, pass).catch(e => alert(e.message));
+    auth.createUserWithEmailAndPassword(
+      email.value, pass.value
+    ).catch(e => alert(e.message));
   };
 }
 
@@ -43,8 +45,14 @@ export function showHome() {
   screens.home.innerHTML = `
     <img src="assets/logo.png" alt="IFRS Logo" style="height:80px">
     <h1>Instrument Flight Rules Sim</h1>
+    <button id="btn-signout">Sign Out</button>
     <div id="plane-list"></div>
   `;
+
+  // Sign out
+  document.getElementById('btn-signout').onclick = () => auth.signOut();
+
+  // Plane selection
   const planes = ['A330-300','A320neo','737 MAX 10','B-17'];
   const listEl = document.getElementById('plane-list');
   planes.forEach(code => {
@@ -60,51 +68,47 @@ export function showHome() {
 
 export async function showSetup() {
   show('setup');
-  screens.setup.innerHTML = `<p>Loading setup options…</p>`;
+  screens.setup.innerHTML = `<p>Loading flight options…</p>`;
 
-  let liveriesData, airportsData;
   try {
-    [liveriesData, airportsData] = await Promise.all([
-      fetch('./assets/liveries.json').then(r => {
-        if (!r.ok) throw new Error('liveries.json not found');
+    const [liveries, airports] = await Promise.all([
+      fetch('assets/liveries.json').then(r => {
+        if (!r.ok) throw new Error('Missing liveries.json');
         return r.json();
       }),
-      fetch('./assets/airports.json').then(r => {
-        if (!r.ok) throw new Error('airports.json not found');
+      fetch('assets/airports.json').then(r => {
+        if (!r.ok) throw new Error('Missing airports.json');
         return r.json();
       })
     ]);
+
+    screens.setup.innerHTML = `
+      <h2>Setup Flight (${flightConfig.plane})</h2>
+      <label>Livery:</label>
+      <select id="sel-livery">
+        ${liveries[flightConfig.plane].map(l => `<option>${l}</option>`).join('')}
+      </select><br>
+      <label>Origin:</label>
+      <select id="sel-origin">${airports.map(a => `<option>${a}</option>`).join('')}</select>
+      <label>Destination:</label>
+      <select id="sel-dest">${airports.map(a => `<option>${a}</option>`).join('')}</select><br>
+      <label><input type="checkbox" id="chk-gate"> Cold & Dark at Gate</label><br>
+      <label><input type="checkbox" id="chk-atc"> Include ATC</label><br>
+      <button id="btn-fly">Fly!</button>
+    `;
+
+    document.getElementById('btn-fly').onclick = () => {
+      flightConfig.livery = document.getElementById('sel-livery').value;
+      flightConfig.origin  = document.getElementById('sel-origin').value;
+      flightConfig.dest    = document.getElementById('sel-dest').value;
+      flightConfig.gate    = document.getElementById('chk-gate').checked;
+      flightConfig.atc     = document.getElementById('chk-atc').checked;
+      showCockpit();
+    };
+
   } catch (err) {
-    screens.setup.innerHTML = `<p>Error: ${err.message}</p>`;
-    return;
+    screens.setup.innerHTML = `<p style="color:red">Error: ${err.message}</p>`;
   }
-
-  const liveryOptions = liveriesData[flightConfig.plane]
-    .map(l => `<option>${l}</option>`).join('');
-  const airportOptions = airportsData
-    .map(a => `<option>${a}</option>`).join('');
-
-  screens.setup.innerHTML = `
-    <h2>Setup Flight (${flightConfig.plane})</h2>
-    <label>Livery:</label>
-    <select id="sel-livery">${liveryOptions}</select><br>
-    <label>Origin:</label>
-    <select id="sel-origin">${airportOptions}</select>
-    <label>Destination:</label>
-    <select id="sel-dest">${airportOptions}</select><br>
-    <label><input type="checkbox" id="chk-gate"> Start Cold & Dark</label><br>
-    <label><input type="checkbox" id="chk-atc"> Include ATC</label><br>
-    <button id="btn-fly">Fly!</button>
-  `;
-
-  document.getElementById('btn-fly').onclick = () => {
-    flightConfig.livery = document.getElementById('sel-livery').value;
-    flightConfig.origin  = document.getElementById('sel-origin').value;
-    flightConfig.dest    = document.getElementById('sel-dest').value;
-    flightConfig.gate    = document.getElementById('chk-gate').checked;
-    flightConfig.atc     = document.getElementById('chk-atc').checked;
-    showCockpit();
-  };
 }
 
 export function showCockpit() {
@@ -132,31 +136,28 @@ export function showCockpit() {
     </div>
   `;
 
-  // Activate panel tabs
-  const tabs = screens.cockpit.querySelectorAll('.tab-buttons button');
-  tabs.forEach(btn => {
+  // Panel tab switching
+  screens.cockpit.querySelectorAll('.tab-buttons button').forEach(btn => {
     btn.onclick = () => {
-      const pid = btn.dataset.page;
       screens.cockpit.querySelectorAll('.panel-page')
         .forEach(p => p.classList.remove('active'));
-      screens.cockpit.querySelector(`#${pid}`).classList.add('active');
+      screens.cockpit.querySelector(`#${btn.dataset.page}`)
+        .classList.add('active');
     };
   });
-  tabs[0].click();
+  // Show first panel by default
+  screens.cockpit.querySelector('.tab-buttons button').click();
 
-  document.getElementById('btn-takeoff').onclick = () => {
-    showRunway();
-  };
+  document.getElementById('btn-takeoff').onclick = () => showRunway();
 }
 
 export function showRunway() {
   show('runway');
   screens.runway.innerHTML = `
     <h2>Runway Ready</h2>
-    <p>${flightConfig.origin} &rarr; ${flightConfig.dest}</p>
+    <p>${flightConfig.origin} → ${flightConfig.dest}</p>
     <button id="btn-start">Start Takeoff Roll</button>
   `;
-  document.getElementById('btn-start').onclick = () => {
+  document.getElementById('btn-start').onclick = () =>
     alert('Takeoff roll initiated!');
-  };
 }
