@@ -9,9 +9,8 @@ window.addEventListener('load', () => {
     navigator.serviceWorker.register('./service-worker.js');
   }
 
-  // Watch authentication state
+  // Redirect based on auth state
   auth.onAuthStateChanged(user => {
-    if (user) showHome();
-    else      showAuth();
+    user ? showHome() : showAuth();
   });
 });
