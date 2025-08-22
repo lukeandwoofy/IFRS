@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>IFRS Simulator</title>
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="manifest.json">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Authentication -->
+  <div id="auth-screen" class="screen"></div>
+
+  <!-- Home -->
+  <div id="home-screen" class="screen hidden"></div>
+
+  <!-- Flight Setup -->
+  <div id="setup-screen" class="screen hidden"></div>
+
+  <!-- Cockpit -->
+  <div id="cockpit-screen" class="screen hidden"></div>
+
+  <!-- Runway / Takeoff -->
+  <div id="runway-screen" class="screen hidden"></div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js"></script>
+
+  <!-- App scripts -->
+  <script src="js/firebase-config.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/ui.js"></script>
+</body>
+</html>
