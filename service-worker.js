@@ -1,6 +1,8 @@
+// service-worker.js
+
 const CACHE_NAME = 'ifrs-cache-v1';
 const ASSETS = [
-  './',
+  '.',                    // root
   './index.html',
   './manifest.json',
   './css/style.css',
@@ -15,9 +17,15 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', evt => {
-  evt.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)));
+  evt.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(ASSETS))
+      .catch(err => console.warn('SW install failed:', err))
+  );
 });
 
 self.addEventListener('fetch', evt => {
-  evt.respondWith(caches.match(evt.request).then(res => res || fetch(evt.request)));
+  evt.respondWith(
+    caches.match(evt.request).then(cached => cached || fetch(evt.request))
+  );
 });
