@@ -1,20 +1,17 @@
-/* Base reset */
+/* Reset & base */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { width: 100%; height: 100%; font-family: sans-serif; background: #061a33; color: #fff; }
 
-/* Screen containers */
+/* Screens */
 .screen { padding: 1rem; }
 .hidden { display: none; }
 
-/* Inputs & Buttons */
-input, select, button { 
-  display: block;
-  margin: 0.5rem 0; 
-  padding: 0.5rem; 
-  font-size: 1rem;
+/* Buttons & inputs */
+button, input, select {
+  margin: 0.5rem 0; padding: 0.5rem; font-size: 1rem;
 }
 
-/* Home plane list */
+/* Home screen */
 #plane-list button { margin-right: 0.5rem; }
 
 /* Cockpit layout */
