@@ -1,0 +1,6 @@
+{
+  "A330-300": ["Virgin Atlantic","TAP Air Portugal","Cathay Pacific","Delta Airlines","Lufthansa"],
+  "A320neo": ["Easyjet","TAP Air Portugal","British Airways","Spirit Airlines","American Airlines","United Airlines","Lufthansa"],
+  "737 MAX 10": ["Ryanair","Delta","Alaskan Airlines","American Airlines","Southwest Airlines"],
+  "B-17": ["USAF livery"]
+}
