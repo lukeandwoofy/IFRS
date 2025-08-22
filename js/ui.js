@@ -1,11 +1,13 @@
+// js/ui.js
+
 import { auth } from './firebase-config.js';
 
 const screens = {
-  auth: document.getElementById('auth-screen'),
-  home: document.getElementById('home-screen'),
-  setup: document.getElementById('setup-screen'),
+  auth:    document.getElementById('auth-screen'),
+  home:    document.getElementById('home-screen'),
+  setup:   document.getElementById('setup-screen'),
   cockpit: document.getElementById('cockpit-screen'),
-  runway: document.getElementById('runway-screen')
+  runway:  document.getElementById('runway-screen')
 };
 
 const flightConfig = {};
@@ -15,37 +17,36 @@ function show(key) {
   screens[key].classList.remove('hidden');
 }
 
-// 1. Authentication Screen
 export function showAuth() {
   show('auth');
   screens.auth.innerHTML = `
     <h1>IFRS Login / Sign Up</h1>
     <input id="email" type="email" placeholder="Email">
-    <input id="pass" type="password" placeholder="Password">
+    <input id="pass"  type="password" placeholder="Password">
     <button id="btn-login">Login</button>
     <button id="btn-signup">Sign Up</button>
   `;
   document.getElementById('btn-login').onclick = () => {
-    auth.signInWithEmailAndPassword(email.value, pass.value)
-      .catch(e => alert(e.message));
+    const email = document.getElementById('email').value;
+    const pass  = document.getElementById('pass').value;
+    auth.signInWithEmailAndPassword(email, pass).catch(e => alert(e.message));
   };
   document.getElementById('btn-signup').onclick = () => {
-    auth.createUserWithEmailAndPassword(email.value, pass.value)
-      .catch(e => alert(e.message));
+    const email = document.getElementById('email').value;
+    const pass  = document.getElementById('pass').value;
+    auth.createUserWithEmailAndPassword(email, pass).catch(e => alert(e.message));
   };
 }
 
-// 2. Home Screen
 export function showHome() {
   show('home');
   screens.home.innerHTML = `
-    <img src="assets/logo.png" alt="IFRS Logo" style="height:80px;">
+    <img src="assets/logo.png" alt="IFRS Logo" style="height:80px">
     <h1>Instrument Flight Rules Sim</h1>
     <div id="plane-list"></div>
-    <button id="btn-begin">Begin Flight</button>
   `;
   const planes = ['A330-300','A320neo','737 MAX 10','B-17'];
-  const list = document.getElementById('plane-list');
+  const listEl = document.getElementById('plane-list');
   planes.forEach(code => {
     const btn = document.createElement('button');
     btn.textContent = code;
@@ -53,36 +54,49 @@ export function showHome() {
       flightConfig.plane = code;
       showSetup();
     };
-    list.appendChild(btn);
+    listEl.appendChild(btn);
   });
-  document.getElementById('btn-begin').onclick = () => {
-    if (!flightConfig.plane) return alert('Select a plane first');
-    showSetup();
-  };
 }
 
-// 3. Flight Setup
 export async function showSetup() {
   show('setup');
-  const [liveries, airports] = await Promise.all([
-    fetch('assets/liveries.json').then(r => r.json()),
-    fetch('assets/airports.json').then(r => r.json())
-  ]);
+  screens.setup.innerHTML = `<p>Loading setup options…</p>`;
+
+  let liveriesData, airportsData;
+  try {
+    [liveriesData, airportsData] = await Promise.all([
+      fetch('./assets/liveries.json').then(r => {
+        if (!r.ok) throw new Error('liveries.json not found');
+        return r.json();
+      }),
+      fetch('./assets/airports.json').then(r => {
+        if (!r.ok) throw new Error('airports.json not found');
+        return r.json();
+      })
+    ]);
+  } catch (err) {
+    screens.setup.innerHTML = `<p>Error: ${err.message}</p>`;
+    return;
+  }
+
+  const liveryOptions = liveriesData[flightConfig.plane]
+    .map(l => `<option>${l}</option>`).join('');
+  const airportOptions = airportsData
+    .map(a => `<option>${a}</option>`).join('');
 
   screens.setup.innerHTML = `
     <h2>Setup Flight (${flightConfig.plane})</h2>
     <label>Livery:</label>
-    <select id="sel-livery">
-      ${liveries[flightConfig.plane].map(l => `<option>${l}</option>`).join('')}
-    </select><br>
+    <select id="sel-livery">${liveryOptions}</select><br>
     <label>Origin:</label>
-    <select id="sel-origin">${airports.map(a => `<option>${a}</option>`)}</select>
+    <select id="sel-origin">${airportOptions}</select>
     <label>Destination:</label>
-    <select id="sel-dest">${airports.map(a => `<option>${a}</option>`)}</select><br>
+    <select id="sel-dest">${airportOptions}</select><br>
     <label><input type="checkbox" id="chk-gate"> Start Cold & Dark</label><br>
     <label><input type="checkbox" id="chk-atc"> Include ATC</label><br>
     <button id="btn-fly">Fly!</button>
   `;
+
   document.getElementById('btn-fly').onclick = () => {
     flightConfig.livery = document.getElementById('sel-livery').value;
     flightConfig.origin  = document.getElementById('sel-origin').value;
@@ -93,7 +107,6 @@ export async function showSetup() {
   };
 }
 
-// 4. Cockpit Screen
 export function showCockpit() {
   show('cockpit');
   screens.cockpit.innerHTML = `
@@ -119,33 +132,31 @@ export function showCockpit() {
     </div>
   `;
 
-  setupPanelPages();
-  document.getElementById('btn-takeoff').onclick = () => showRunway();
-}
-
-// Panel tabs logic
-function setupPanelPages() {
+  // Activate panel tabs
   const tabs = screens.cockpit.querySelectorAll('.tab-buttons button');
   tabs.forEach(btn => {
     btn.onclick = () => {
+      const pid = btn.dataset.page;
       screens.cockpit.querySelectorAll('.panel-page')
         .forEach(p => p.classList.remove('active'));
-      screens.cockpit.querySelector(`#${btn.dataset.page}`)
-        .classList.add('active');
+      screens.cockpit.querySelector(`#${pid}`).classList.add('active');
     };
   });
-  tabs[0].click(); // open ENGINE by default
+  tabs[0].click();
+
+  document.getElementById('btn-takeoff').onclick = () => {
+    showRunway();
+  };
 }
 
-// 5. Runway / Takeoff Screen
 export function showRunway() {
   show('runway');
   screens.runway.innerHTML = `
     <h2>Runway Ready</h2>
-    <p>Airport: ${flightConfig.origin} ➔ ${flightConfig.dest}</p>
+    <p>${flightConfig.origin} &rarr; ${flightConfig.dest}</p>
     <button id="btn-start">Start Takeoff Roll</button>
   `;
   document.getElementById('btn-start').onclick = () => {
-    alert('Takeoff roll started! (controls on the left)');
+    alert('Takeoff roll initiated!');
   };
 }
