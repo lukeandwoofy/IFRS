@@ -52,9 +52,9 @@ if ('speechSynthesis' in window) {
 }
 function say(voice, text) {
   try {
-    const utter = new SpeechSynthesisUtterance(text);
-    if (voice) utter.voice = voice;
-    speechSynthesis.speak(utter);
+    const utt = new SpeechSynthesisUtterance(text);
+    if (voice) utt.voice = voice;
+    speechSynthesis.speak(utt);
   } catch {}
 }
 const sayATC   = t => say(voiceATC,   t);
@@ -62,46 +62,38 @@ const sayPilot = t => say(voicePilot, t);
 
 /* Flight & Systems State */
 const flight = {
-  // identity
   plane: null, livery: null, origin: null, dest: null,
   coldDark: false, atcIncluded: true,
-
   // navigation
   t: 0, durationSec: 300,
-
   // physics
   tasKts: 0, altFt: 0, vsFpm: 0,
   hdgDeg: 0, rollDeg: 0, pitchDeg: 0,
-
   // controls
   enginesRunning: false,
   throttle: 0, flaps: 0, gearDown: true,
   rudder: 0, trim: 0,
-
   // autopilot
   ap: { speedKts: 160, altFt: 6000, vsFpm: 1200, hdgDeg: 0, ap1: false, ap2: false },
-
   // systems
-  eng:  { master1:false, master2:false, ign:false,  fire1:false, fire2:false },
+  eng:  { master1:false, master2:false, ign:false, fire1:false, fire2:false },
   apu:  { master:false, start:false, bleed:false, avail:false },
   fuel: { pumpL:false, pumpR:false, pumpCTR:false, xfeed:false },
   lights:{ beacon:false, strobe:false, land:false, taxi:false, logo:false, wing:false, seatbelt:false },
-
   // fuel gauge
   fuelMax: 0, fuelKg: 0
 };
-// Timer & wind globals
 let flightStartTime = 0, timerEl = null;
 let windDir = 0, windKts = 0;
 
-// Airport coordinates
+/* Airport Coordinates */
 const AirportDB = {
-  LPPT:{ name:"Lisbon", lat:38.7813, lon:-9.1359 },
-  EGKK:{ name:"Gatwick",lat:51.1537, lon:-0.1821 },
-  EGLL:{ name:"Heathrow",lat:51.4706, lon:-0.4619 },
-  KIAD:{ name:"Dulles", lat:38.9531, lon:-77.4565 },
-  KJFK:{ name:"JFK",    lat:40.6413, lon:-73.7781 },
-  KLAX:{ name:"LAX",    lat:33.9416, lon:-118.4085 }
+  LPPT:{name:"Lisbon", lat:38.7813, lon:-9.1359},
+  EGKK:{name:"Gatwick",lat:51.1537, lon:-0.1821},
+  EGLL:{name:"Heathrow",lat:51.4706, lon:-0.4619},
+  KIAD:{name:"Dulles", lat:38.9531, lon:-77.4565},
+  KJFK:{name:"JFK",    lat:40.6413, lon:-73.7781},
+  KLAX:{name:"LAX",    lat:33.9416, lon:-118.4085}
 };
 
 /* Utilities */
@@ -110,7 +102,7 @@ const lerp       = (a,b,t) => a + (b-a)*t;
 const lerpLatLon = (a,b,t) => ({ lat: lerp(a.lat,b.lat,t), lon: lerp(a.lon,b.lon,t) });
 const pad        = (n,w=2) => String(n).padStart(w,'0');
 
-/* 1) Authentication Screen */
+/* 1. AUTH screen */
 export function showAuth() {
   show('auth');
   screens.auth.innerHTML = `
@@ -126,7 +118,7 @@ export function showAuth() {
     auth.createUserWithEmailAndPassword(email.value, pass.value).catch(e=>alert(e.message));
 }
 
-/* 2) Home Screen */
+/* 2. HOME screen */
 export function showHome() {
   show('home');
   screens.home.innerHTML = `
@@ -157,14 +149,14 @@ export function showHome() {
     selected ? showSetup() : alert('Select a plane first');
 }
 
-/* 3) Setup Screen */
+/* 3. SETUP screen */
 export async function showSetup() {
   show('setup');
   screens.setup.innerHTML = `<p>Loading flight options…</p>`;
 
-  let lvr, apt;
+  let liveries, airports;
   try {
-    [lvr,apt] = await Promise.all([
+    [liveries, airports] = await Promise.all([
       fetch('./assets/liveries.json').then(r=>r.json()),
       fetch('./assets/airports.json').then(r=>r.json())
     ]);
@@ -176,21 +168,21 @@ export async function showSetup() {
   screens.setup.innerHTML = `
     <h2>Setup Flight (${flight.plane})</h2>
     <label>Livery</label>
-    <select id="sel-livery">${(lvr[flight.plane]||[]).map(o=>`<option>${o}</option>`).join('')}</select><br>
+    <select id="sel-livery">${(liveries[flight.plane]||[]).map(o=>`<option>${o}</option>`).join('')}</select><br>
     <label>Origin</label>
-    <select id="sel-origin">${apt.map(o=>`<option>${o}</option>`).join('')}</select><br>
+    <select id="sel-origin">${airports.map(o=>`<option>${o}</option>`).join('')}</select><br>
     <label>Destination</label>
-    <select id="sel-dest">${apt.map(o=>`<option>${o}</option>`).join('')}</select><br>
+    <select id="sel-dest">${airports.map(o=>`<option>${o}</option>`).join('')}</select><br>
     <label><input id="chk-gate" type="checkbox"> Cold & Dark at Gate</label><br>
     <label><input id="chk-atc"  type="checkbox" checked> Include ATC</label><br>
     <button id="btn-fly">Fly!</button>
   `;
 
   document.getElementById('btn-fly').onclick = () => {
-    flight.livery = document.getElementById('sel-livery').value;
-    flight.origin = document.getElementById('sel-origin').value;
-    flight.dest   = document.getElementById('sel-dest').value;
-    flight.coldDark = document.getElementById('chk-gate').checked;
+    flight.livery      = document.getElementById('sel-livery').value;
+    flight.origin      = document.getElementById('sel-origin').value;
+    flight.dest        = document.getElementById('sel-dest').value;
+    flight.coldDark    = document.getElementById('chk-gate').checked;
     flight.atcIncluded = document.getElementById('chk-atc').checked;
     initFlight();
     showCockpit();
@@ -208,7 +200,7 @@ function initFlight() {
   }
   // Fuel capacity
   const caps = { 'A330-300':139000, 'A320neo':27000, '737 MAX 10':26000, 'B-17':8000 };
-  flight.fuelMax = caps[flight.plane] || 20000;
+  flight.fuelMax = caps[flight.plane]||20000;
   flight.fuelKg  = flight.fuelMax;
   // Wind
   windKts = Math.round(Math.random()*40);
@@ -231,8 +223,10 @@ function initFlight() {
   }
 }
 
-/* 4) Cockpit Screen */
-let map, routeLine, planeMarker, attCanvas, attCtx, speedEl, altEl, vsEl;
+/* 4. COCKPIT screen */
+let map, routeLine, planeMarker, attCanvas, attCtx, speedEl, altEl, vsEl, lastTime=0, rafId=0;
+let atcController;
+
 export function showCockpit() {
   show('cockpit');
   screens.cockpit.innerHTML = `
@@ -277,14 +271,13 @@ export function showCockpit() {
     <div id="right-pane"></div>
   `;
 
-  // Button callbacks
+  // Buttons
   document.getElementById('btn-audio').onclick = () => { ensureWhineStarted(); play(A.click()); };
   document.getElementById('btn-night').onclick = () => {
-    document.body.classList.toggle('night');
-    play(A.click());
+    document.body.classList.toggle('night'); play(A.click());
   };
 
-  // Initialize dynamic elements
+  // Timer init
   flightStartTime = performance.now();
   timerEl = document.getElementById('flight-timer');
 
@@ -309,7 +302,7 @@ export function showCockpit() {
 
 /* Tabs */
 function setupTabs() {
-  document.getElementById('tabs').querySelectorAll('.tab').forEach(btn => {
+  document.getElementById('tabs').querySelectorAll('.tab').forEach(btn=> {
     btn.onclick = () => {
       document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
       document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
@@ -330,12 +323,12 @@ function renderEnginePanel() {
     <div class="switch"><span class="label">ENG2 MASTER</span><button id="btn-eng2">${flight.eng.master2?'ON':'OFF'}</button><span id="led-eng2" class="led ${flight.eng.master2?'on':''}"></span></div>
     <div class="switch"><span class="label">FIRE TEST 1</span><button id="btn-fire1">TEST</button><span id="led-fire1" class="led ${flight.eng.fire1?'on':''}"></span></div>
     <div class="switch"><span class="label">FIRE TEST 2</span><button id="btn-fire2">TEST</button><span id="led-fire2" class="led ${flight.eng.fire2?'on':''}"></span></div>
-    <p style="opacity:.7; margin-top:.5rem;">Startup: APU→BLEED→Fuel→IGN→EMAST(1/2)</p>
+    <p style="opacity:.7;margin-top:.5rem;">Startup: APU→BLEED→Fuel→IGN→EMAST</p>
   `;
-  const toggle = (obj,k,led,btn) => {
-    obj[k]=!obj[k];
-    document.getElementById(led).classList.toggle('on',obj[k]);
-    document.getElementById(btn).textContent = obj[k]?'ON':'OFF';
+  const toggle = (obj,k,ledId,btnId) => {
+    obj[k] = !obj[k];
+    document.getElementById(ledId).classList.toggle('on',obj[k]);
+    document.getElementById(btnId).textContent = obj[k]?'ON':'OFF';
     play(A.click()); checkEngineSpool();
   };
   document.getElementById('btn-ign').onclick  = ()=>toggle(flight.eng,'ign','led-ign','btn-ign');
@@ -406,107 +399,4 @@ function renderFuelPanel() {
 
 /* LIGHTS panel */
 function renderLightsPanel() {
-  const el = document.getElementById('LIGHTS');
-  el.innerHTML = `
-    <div class="ann info">LIGHTS</div><br>
-    ${['beacon','strobe','land','taxi','logo','wing','seatbelt'].map(n=>`
-      <div class="switch"><span class="label">${n.toUpperCase()}</span>
-        <button id="btn-${n}">${flight.lights[n]?'ON':'OFF'}</button>
-        <span id="led-${n}" class="led ${flight.lights[n]?'on':''}"></span>
-      </div>`).join('')}
-  `;
-  ['beacon','strobe','land','taxi','logo','wing','seatbelt'].forEach(n=>{
-    document.getElementById(`btn-${n}`).onclick=()=>{
-      flight.lights[n]=!flight.lights[n];
-      document.getElementById(`led-${n}`).classList.toggle('on',flight.lights[n]);
-      document.getElementById(`btn-${n}`).textContent=flight.lights[n]?'ON':'OFF';
-      play(n==='seatbelt'?A.ding():A.click());
-    };
-  });
-}
-
-/* AUTOPILOT panel */
-function renderAutopilotPanel() {
-  const el = document.getElementById('AP');
-  const blocked = !flight.enginesRunning;
-  el.innerHTML = `
-    <div class="ann info">FCU ${blocked?'—AP OFF':''}</div><br>
-    <div class="switch"><span class="label">SPD</span><button id="spd-dec">-</button><span id="spd" class="num">${flight.ap.speedKts}</span><button id="spd-inc">+</button></div>
-    <div class="switch"><span class="label">ALT</span><button id="alt-dec">-</button><span id="altset" class="num">${flight.ap.altFt}</span><button id="alt-inc">+</button></div>
-    <div class="switch"><span class="label">VS</span><button id="vs-dec">-</button><span id="vsset" class="num">${flight.ap.vsFpm}</span><button id="vs-inc">+</button></div>
-    <div class="switch"><span class="label">HDG</span><button id="hdg-dec">-</button><span id="hdgset" class="num">${pad(Math.round(flight.ap.hdgDeg),3)}</span><button id="hdg-inc">+</button></div>
-    <div class="switch"><span class="label">AP1</span><button id="ap1" ${blocked?'disabled':''}>${flight.ap.ap1?'ON':'OFF'}</button><span id="led-ap1" class="led ${flight.ap.ap1?'on':''}"></span></div>
-    <div class="switch"><span class="label">AP2</span><button id="ap2" ${blocked?'disabled':''}>${flight.ap.ap2?'ON':'OFF'}</button><span id="led-ap2" class="led ${flight.ap.ap2?'on':''}"></span></div>
-  `;
-  const upd = ()=>{
-    document.getElementById('spd').textContent   = flight.ap.speedKts;
-    document.getElementById('altset').textContent= flight.ap.altFt;
-    document.getElementById('vsset').textContent = flight.ap.vsFpm;
-    document.getElementById('hdgset').textContent= pad(Math.round(flight.ap.hdgDeg),3);
-  };
-  document.getElementById('spd-dec').onclick=()=>{flight.ap.speedKts=clamp(flight.ap.speedKts-5,120,330);play(A.click());upd();};
-  document.getElementById('spd-inc').onclick=()=>{flight.ap.speedKts=clamp(flight.ap.speedKts+5,120,330);play(A.click());upd();};
-  document.getElementById('alt-dec').onclick=()=>{flight.ap.altFt=clamp(flight.ap.altFt-500,0,39000);play(A.click());upd();};
-  document.getElementById('alt-inc').onclick=()=>{flight.ap.altFt=clamp(flight.ap.altFt+500,0,39000);play(A.click());upd();};
-  document.getElementById('vs-dec').onclick=()=>{flight.ap.vsFpm=clamp(flight.ap.vsFpm-100,-3000,3000);play(A.click());upd();};
-  document.getElementById('vs-inc').onclick=()=>{flight.ap.vsFpm=clamp(flight.ap.vsFpm+100,-3000,3000);play(A.click());upd();};
-  document.getElementById('hdg-dec').onclick=()=>{flight.ap.hdgDeg=(flight.ap.hdgDeg-5+360)%360;play(A.click());upd();};
-  document.getElementById('hdg-inc').onclick=()=>{flight.ap.hdgDeg=(flight.ap.hdgDeg+5)%360;play(A.click());upd();};
-  if(!blocked){
-    document.getElementById('ap1').onclick=()=>{flight.ap.ap1=!flight.ap.ap1;document.getElementById('led-ap1').classList.toggle('on',flight.ap.ap1);play(A.click());};
-    document.getElementById('ap2').onclick=()=>{flight.ap.ap2=!flight.ap.ap2;document.getElementById('led-ap2').classList.toggle('on',flight.ap.ap2);play(A.click());};
-  }
-}
-
-/* ATC panel */
-function renderATCPanel() {
-  const el = document.getElementById('ATC');
-  el.innerHTML = `
-    <div class="ann info">ATC</div><br>
-    <div class="atc-row">
-      <span class="freq">CLR 121.900</span>
-      <span class="freq">GND 121.700</span>
-      <span class="freq">TWR 118.700</span>
-      <span class="freq">DEP 124.500</span>
-      <span class="freq">APP 119.000</span>
-    </div>
-    <div id="atc-log"></div>
-    <div class="atc-row">
-      <button id="atc-connect">Connect</button>
-      <button id="atc-request">Request</button>
-      <button id="atc-readback">Readback</button>
-      <button id="atc-next">Next</button>
-      <button id="atc-disconnect">Disconnect</button>
-    </div>
-  `;
-  atcController = makeATC();
-  document.getElementById('atc-connect').onclick    = ()=>atcController.connect();
-  document.getElementById('atc-request').onclick    = ()=>atcController.request();
-  document.getElementById('atc-readback').onclick   = ()=>atcController.readback();
-  document.getElementById('atc-next').onclick       = ()=>atcController.next();
-  document.getElementById('atc-disconnect').onclick = ()=>atcController.disconnect();
-}
-function logATC(type,text) {
-  const box = document.getElementById('atc-log');
-  const div = document.createElement('div');
-  div.className = type==='rx'?'rx':'tx';
-  div.textContent = text;
-  box.appendChild(div);
-  box.scrollTop = box.scrollHeight;
-}
-function makeATC(){
-  let connected=false,i=0;
-  const cs = `${flight.plane.replace(/\s+/g,'')}${Math.floor(100+Math.random()*900)}`;
-  const legs=[
-    {id:'CLR',  tx:`${cs}, request IFR clearance ${flight.origin} to ${flight.dest}`, rx:`${cs}, cleared to ${flight.dest} as filed, climb maintain 6000, departure 124.5, squawk 4301.`},
-    {id:'GND',  tx:`${cs}, ready to taxi`, rx:`${cs}, taxi to runway 27 via A, hold short runway 27.`},
-    {id:'TWR',  tx:`${cs}, ready for departure runway 27`, rx:`${cs}, wind calm, cleared for takeoff runway 27.`},
-    {id:'DEP',  tx:`${cs}, passing 2000 for 6000`, rx:`${cs}, radar contact, proceed direct, climb maintain 6000, fly heading ${Math.round(flight.ap.hdgDeg)}.`},
-    {id:'APP',  tx:`${cs}, inbound for landing`, rx:`${cs}, descend maintain 3000, vectors ILS, contact tower 118.7 on final.`},
-    {id:'TWR2', tx:`${cs}, established ILS runway 27`, rx:`${cs}, cleared to land runway 27.`}
-  ];
-  return {
-    connect(){if(connected)return;connected=true;logATC('rx','ATC connected.');sayATC('ATC connected');},
-    request(){if(!connected)return;logATC('tx',legs[i].tx);sayPilot(legs[i].tx);},
-    readback(){if(!connected)return;const rb=legs[i].rx.replace('radar contact, ','');logATC('tx',`${cs} readback ${rb}`);sayPilot(`${cs} readback ${rb}`);},
-    next(){if(!
+  const el = document.getElementById
