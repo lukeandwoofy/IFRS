@@ -1,12 +1,6 @@
 /* Base */
 * { box-sizing: border-box; }
-html, body {
-  height: 100%;
-  margin: 0;
-  background: #061a33;
-  color: #e6eefc;
-  font-family: "B612", system-ui, sans-serif;
-}
+html, body { height: 100%; margin: 0; background: #061a33; color: #e6eefc; font-family: "B612", system-ui, sans-serif; }
 .screen { padding: 12px; }
 .hidden { display: none; }
 
@@ -18,17 +12,13 @@ input, select, button {
   font-size: 16px;
   padding: 8px 10px;
   margin: 6px 0;
-  background: #0b254a;
   color: #e6eefc;
+  background: linear-gradient(180deg, #0d2a50 0%, #0a2346 100%);
   border: 1px solid #1b3e6d;
   border-radius: 6px;
 }
-button {
-  cursor: pointer;
-  background: #1e3a5f;
-  border: 1px solid #2b5587;
-}
-button:hover { background: #244e7e; }
+button { cursor: pointer; }
+button:hover { filter: brightness(1.08); }
 
 /* Cockpit layout */
 #cockpit-screen {
@@ -41,16 +31,22 @@ button:hover { background: #244e7e; }
   gap: 12px;
 }
 #cockpit-title { grid-area: title; display: flex; align-items: center; gap: 12px; }
-#left-pane    { grid-area: left; background: #0a2346; border: 1px solid #1b3e6d; border-radius: 8px; padding: 10px; }
-#center-pane  { grid-area: center; display: grid; grid-template-rows: 260px 1fr; gap: 12px; }
-#right-pane   { grid-area: right; background: #0a2346; border: 1px solid #1b3e6d; border-radius: 8px; padding: 10px; }
+#left-pane, #right-pane {
+  background: linear-gradient(180deg, #0a2346 0%, #081e3a 100%);
+  border: 1px solid #1b3e6d;
+  border-radius: 8px;
+  padding: 10px;
+}
+#left-pane { grid-area: left; }
+#center-pane { grid-area: center; display: grid; grid-template-rows: 260px 1fr; gap: 12px; }
+#right-pane { grid-area: right; }
 
 /* Map */
 #map { height: 260px; border: 1px solid #1b3e6d; border-radius: 8px; overflow: hidden; }
 
 /* Instruments panel */
 #instruments {
-  background: #0a2346;
+  background: linear-gradient(180deg, #0a2346 0%, #081e3a 100%);
   border: 1px solid #1b3e6d;
   border-radius: 8px;
   padding: 10px;
@@ -82,7 +78,7 @@ button:hover { background: #244e7e; }
 
 /* Switches */
 .switch { display: inline-flex; align-items: center; gap: 8px; background: #0d2a4e; border: 1px solid #2b5587; border-radius: 6px; padding: 6px 8px; margin: 6px 6px 0 0; }
-.switch .label { font-size: 12px; color: #b3c7e6; }
+.switch .label { font-size: 12px; color: #b3c7e6; text-transform: uppercase; }
 .switch button { background: #183860; border: 1px solid #2b5587; border-radius: 4px; padding: 4px 8px; font-size: 12px; }
 .switch .led { width: 10px; height: 10px; border-radius: 50%; background: #233; border: 1px solid #345; }
 .led.on { background: #2aff5a; }
@@ -104,3 +100,11 @@ button:hover { background: #244e7e; }
 #atc-log .rx { color: #8ab6ff; font-family: "B612 Mono", monospace; margin: 2px 0; }
 .atc-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .freq { background: #091c37; padding: 4px 8px; border: 1px solid #1b3e6d; border-radius: 4px; font-family: "B612 Mono", monospace; }
+
+/* Plane marker (DivIcon) */
+.plane-icon {
+  width: 32px; height: 32px;
+  transform-origin: 50% 50%;
+  filter: drop-shadow(0 0 2px rgba(0,0,0,0.6));
+}
+.plane-icon svg { width: 32px; height: 32px; display: block; }
