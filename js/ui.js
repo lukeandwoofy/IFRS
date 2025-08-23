@@ -675,7 +675,7 @@ function drawPFD(ctx, w, h, pitchDeg, rollDeg) {
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = '#ffffff';
   ctx.font = '12px B612 Mono, monospace';
-  for (let p=-20; p<=20; p+=5) {
+  for (let p=-20; p<=20; p+=5) 
     if (p===0) continue;
     const yy = y - p * 4;
     ctx.beginPath();
