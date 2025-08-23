@@ -1,32 +1,106 @@
-/* Reset & base */
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { width: 100%; height: 100%; font-family: sans-serif; background: #061a33; color: #fff; }
-
-/* Screens */
-.screen { padding: 1rem; }
+/* Base */
+* { box-sizing: border-box; }
+html, body {
+  height: 100%;
+  margin: 0;
+  background: #061a33;
+  color: #e6eefc;
+  font-family: "B612", system-ui, sans-serif;
+}
+.screen { padding: 12px; }
 .hidden { display: none; }
 
-/* Buttons & inputs */
-button, input, select {
-  margin: 0.5rem 0; padding: 0.5rem; font-size: 1rem;
-}
+h1, h2, h3 { font-weight: 700; letter-spacing: 0.5px; }
 
-/* Home screen */
-#plane-list button { margin-right: 0.5rem; }
+/* Inputs & buttons */
+input, select, button {
+  font-family: "B612", sans-serif;
+  font-size: 16px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  background: #0b254a;
+  color: #e6eefc;
+  border: 1px solid #1b3e6d;
+  border-radius: 6px;
+}
+button {
+  cursor: pointer;
+  background: #1e3a5f;
+  border: 1px solid #2b5587;
+}
+button:hover { background: #244e7e; }
 
 /* Cockpit layout */
 #cockpit-screen {
   display: grid;
+  grid-template-columns: 420px 1fr 380px;
+  grid-template-rows: auto 1fr;
   grid-template-areas:
-    "map instruments"
-    "map controls";
-  grid-gap: 1rem;
+    "title title title"
+    "left  center right";
+  gap: 12px;
 }
-#map { grid-area: map; height: 200px; background: #112; }
-#instruments { grid-area: instruments; background: #223; padding: 1rem; }
-#controls { grid-area: controls; background: #223; padding: 1rem; }
+#cockpit-title { grid-area: title; display: flex; align-items: center; gap: 12px; }
+#left-pane    { grid-area: left; background: #0a2346; border: 1px solid #1b3e6d; border-radius: 8px; padding: 10px; }
+#center-pane  { grid-area: center; display: grid; grid-template-rows: 260px 1fr; gap: 12px; }
+#right-pane   { grid-area: right; background: #0a2346; border: 1px solid #1b3e6d; border-radius: 8px; padding: 10px; }
 
-/* Panel tabs */
-.tab-buttons button { margin-right: 0.5rem; }
-.panel-page { display: none; }
-.panel-page.active { display: block; }
+/* Map */
+#map { height: 260px; border: 1px solid #1b3e6d; border-radius: 8px; overflow: hidden; }
+
+/* Instruments panel */
+#instruments {
+  background: #0a2346;
+  border: 1px solid #1b3e6d;
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 1fr 120px 120px 90px;
+  gap: 12px;
+  align-items: center;
+}
+#attitude {
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  background: #071b34;
+  border: 1px solid #1b3e6d;
+  border-radius: 8px;
+}
+
+/* Numeric tapes */
+.tape { background: #081f3c; border: 1px solid #1b3e6d; border-radius: 8px; height: 220px; padding: 6px; font-family: "B612 Mono", monospace; }
+.tape-title { font-size: 12px; color: #9fb6d9; margin-bottom: 4px; }
+.num { font-family: "B612 Mono", monospace; font-size: 22px; background: #122d57; border: 1px solid #2b5587; padding: 6px 8px; border-radius: 6px; display: inline-block; min-width: 70px; text-align: right; }
+
+/* Tabs & panels */
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.tab { padding: 6px 10px; font-size: 14px; background: #102a52; border: 1px solid #1e406f; border-radius: 6px; }
+.tab.active { background: #1e3a5f; border-color: #2b5587; }
+.panel { display: none; background: #081e3a; border: 1px solid #1b3e6d; border-radius: 8px; padding: 10px; }
+.panel.active { display: block; }
+
+/* Switches */
+.switch { display: inline-flex; align-items: center; gap: 8px; background: #0d2a4e; border: 1px solid #2b5587; border-radius: 6px; padding: 6px 8px; margin: 6px 6px 0 0; }
+.switch .label { font-size: 12px; color: #b3c7e6; }
+.switch button { background: #183860; border: 1px solid #2b5587; border-radius: 4px; padding: 4px 8px; font-size: 12px; }
+.switch .led { width: 10px; height: 10px; border-radius: 50%; background: #233; border: 1px solid #345; }
+.led.on { background: #2aff5a; }
+
+/* Annunciators */
+.ann { display: inline-block; padding: 4px 8px; margin: 4px 6px 0 0; border-radius: 4px; font-family: "B612 Mono", monospace; font-size: 12px; }
+.ann.warn { background: #8b1f1f; }
+.ann.caut { background: #7a5f13; }
+.ann.info { background: #163b7a; }
+
+/* Info cards */
+.card { background: #0a2346; border: 1px solid #1b3e6d; border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+.card img { width: 100%; display: block; }
+.card .body { padding: 8px; }
+
+/* ATC */
+#atc-log { background: #0a1f3d; border: 1px solid #1b3e6d; border-radius: 6px; padding: 8px; height: 180px; overflow-y: auto; margin-bottom: 8px; }
+#atc-log .tx { color: #76ff8a; font-family: "B612 Mono", monospace; margin: 2px 0; }
+#atc-log .rx { color: #8ab6ff; font-family: "B612 Mono", monospace; margin: 2px 0; }
+.atc-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.freq { background: #091c37; padding: 4px 8px; border: 1px solid #1b3e6d; border-radius: 4px; font-family: "B612 Mono", monospace; }
