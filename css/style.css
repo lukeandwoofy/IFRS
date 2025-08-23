@@ -1,110 +1,80 @@
-/* Base */
-* { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; background: #061a33; color: #e6eefc; font-family: "B612", system-ui, sans-serif; }
-.screen { padding: 12px; }
-.hidden { display: none; }
+/* Base & layout */
+* { box-sizing: border-box; margin:0; padding:0; }
+html, body { width:100%; height:100%; background:#061a33; color:#e6eefc; font-family:"B612",sans-serif; }
+.screen { padding:1rem; }
+.hidden { display:none; }
 
-h1, h2, h3 { font-weight: 700; letter-spacing: 0.5px; }
+/* Typography */
+h1,h2,h3 { font-weight:700; }
 
 /* Inputs & buttons */
 input, select, button {
-  font-family: "B612", sans-serif;
-  font-size: 16px;
-  padding: 8px 10px;
-  margin: 6px 0;
-  color: #e6eefc;
-  background: linear-gradient(180deg, #0d2a50 0%, #0a2346 100%);
-  border: 1px solid #1b3e6d;
-  border-radius: 6px;
+  font-family:"B612"; font-size:1rem; padding:0.5rem; margin:0.5rem 0;
+  background:linear-gradient(#0d2a50,#0a2346); color:#e6eefc; border:1px solid #1b3e6d; border-radius:6px;
 }
-button { cursor: pointer; }
-button:hover { filter: brightness(1.08); }
+button { cursor:pointer; }
+button:hover { filter:brightness(1.1); }
 
-/* Cockpit layout */
+/* Cockpit grid */
 #cockpit-screen {
-  display: grid;
-  grid-template-columns: 420px 1fr 380px;
-  grid-template-rows: auto 1fr;
-  grid-template-areas:
-    "title title title"
-    "left  center right";
-  gap: 12px;
+  display:grid;
+  grid-template:
+    "title  title   title" auto
+    "left   center  right" 1fr / 300px 1fr 300px;
+  gap:1rem;
 }
-#cockpit-title { grid-area: title; display: flex; align-items: center; gap: 12px; }
-#left-pane, #right-pane {
-  background: linear-gradient(180deg, #0a2346 0%, #081e3a 100%);
-  border: 1px solid #1b3e6d;
-  border-radius: 8px;
-  padding: 10px;
-}
-#left-pane { grid-area: left; }
-#center-pane { grid-area: center; display: grid; grid-template-rows: 260px 1fr; gap: 12px; }
-#right-pane { grid-area: right; }
+#cockpit-title { grid-area:title; display:flex; align-items:center; gap:1rem; }
+#left-pane   { grid-area:left; background:#0a2346; border:1px solid #1b3e6d; border-radius:8px; padding:1rem; }
+#center-pane { grid-area:center; display:grid; grid-template-rows:250px 1fr; gap:1rem; }
+#right-pane  { grid-area:right; background:#0a2346; border:1px solid #1b3e6d; border-radius:8px; padding:1rem; }
 
 /* Map */
-#map { height: 260px; border: 1px solid #1b3e6d; border-radius: 8px; overflow: hidden; }
+#map { width:100%; height:250px; border:1px solid #1b3e6d; border-radius:6px; }
 
-/* Instruments panel */
+/* Instruments */
 #instruments {
-  background: linear-gradient(180deg, #0a2346 0%, #081e3a 100%);
-  border: 1px solid #1b3e6d;
-  border-radius: 8px;
-  padding: 10px;
-  display: grid;
-  grid-template-columns: 1fr 120px 120px 90px;
-  gap: 12px;
-  align-items: center;
+  display:grid; grid-template-columns:1fr 100px 100px 80px; gap:1rem;
+  background:#0a2346; border:1px solid #1b3e6d; border-radius:8px; padding:1rem;
 }
-#attitude {
-  width: 100%;
-  height: 100%;
-  min-height: 220px;
-  background: #071b34;
-  border: 1px solid #1b3e6d;
-  border-radius: 8px;
-}
+#attitude { background:#071b34; border:1px solid #1b3e6d; border-radius:6px; width:100%; height:100%; }
 
 /* Numeric tapes */
-.tape { background: #081f3c; border: 1px solid #1b3e6d; border-radius: 8px; height: 220px; padding: 6px; font-family: "B612 Mono", monospace; }
-.tape-title { font-size: 12px; color: #9fb6d9; margin-bottom: 4px; }
-.num { font-family: "B612 Mono", monospace; font-size: 22px; background: #122d57; border: 1px solid #2b5587; padding: 6px 8px; border-radius: 6px; display: inline-block; min-width: 70px; text-align: right; }
+.tape { background:#081f3c; border:1px solid #1b3e6d; border-radius:6px; padding:0.5rem; display:flex; flex-direction:column; align-items:center; }
+.tape-title { font-size:0.75rem; color:#9fb6d9; }
+.num { font-family:"B612 Mono"; font-size:1.25rem; background:#122d57; border:1px solid #2b5587; border-radius:4px; padding:0.25rem 0.5rem; }
 
 /* Tabs & panels */
-.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-.tab { padding: 6px 10px; font-size: 14px; background: #102a52; border: 1px solid #1e406f; border-radius: 6px; }
-.tab.active { background: #1e3a5f; border-color: #2b5587; }
-.panel { display: none; background: #081e3a; border: 1px solid #1b3e6d; border-radius: 8px; padding: 10px; }
-.panel.active { display: block; }
+.tabs { display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:1rem; }
+.tab { padding:0.5rem 1rem; background:#102a52; border:1px solid #1e406f; border-radius:6px; }
+.tab.active { background:#1e3a5f; border-color:#2b5587; }
+.panel { display:none; background:#081e3a; border:1px solid #1b3e6d; border-radius:8px; padding:1rem; }
+.panel.active { display:block; }
 
-/* Switches */
-.switch { display: inline-flex; align-items: center; gap: 8px; background: #0d2a4e; border: 1px solid #2b5587; border-radius: 6px; padding: 6px 8px; margin: 6px 6px 0 0; }
-.switch .label { font-size: 12px; color: #b3c7e6; text-transform: uppercase; }
-.switch button { background: #183860; border: 1px solid #2b5587; border-radius: 4px; padding: 4px 8px; font-size: 12px; }
-.switch .led { width: 10px; height: 10px; border-radius: 50%; background: #233; border: 1px solid #345; }
-.led.on { background: #2aff5a; }
+/* Switch styling */
+.switch { display:inline-flex; align-items:center; gap:0.5rem; background:#0d2a4e; border:1px solid #2b5587; border-radius:6px; padding:0.5rem; margin:0.5rem 0; }
+.switch .label { font-size:0.75rem; text-transform:uppercase; }
+.switch .led { width:10px; height:10px; border-radius:50%; background:#233; border:1px solid #345; }
+.led.on { background:#2aff5a; }
 
 /* Annunciators */
-.ann { display: inline-block; padding: 4px 8px; margin: 4px 6px 0 0; border-radius: 4px; font-family: "B612 Mono", monospace; font-size: 12px; }
-.ann.warn { background: #8b1f1f; }
-.ann.caut { background: #7a5f13; }
-.ann.info { background: #163b7a; }
+.ann { display:inline-block; padding:0.25rem 0.5rem; border-radius:4px; font-family:"B612 Mono"; font-size:0.75rem; margin:0.25rem 0.5rem 0 0; }
+.ann.info { background:#163b7a; }
+.ann.caut { background:#7a5f13; }
+.ann.warn { background:#8b1f1f; }
 
 /* Info cards */
-.card { background: #0a2346; border: 1px solid #1b3e6d; border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
-.card img { width: 100%; display: block; }
-.card .body { padding: 8px; }
+.card { background:#0a2346; border:1px solid #1b3e6d; border-radius:8px; overflow:hidden; margin-bottom:1rem; }
+.card img { width:100%; display:block; }
+.card .body { padding:0.5rem; }
 
-/* ATC */
-#atc-log { background: #0a1f3d; border: 1px solid #1b3e6d; border-radius: 6px; padding: 8px; height: 180px; overflow-y: auto; margin-bottom: 8px; }
-#atc-log .tx { color: #76ff8a; font-family: "B612 Mono", monospace; margin: 2px 0; }
-#atc-log .rx { color: #8ab6ff; font-family: "B612 Mono", monospace; margin: 2px 0; }
-.atc-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.freq { background: #091c37; padding: 4px 8px; border: 1px solid #1b3e6d; border-radius: 4px; font-family: "B612 Mono", monospace; }
+/* ATC logs */
+#atc-log { background:#0a1f3d; border:1px solid #1b3e6d; border-radius:6px; padding:0.5rem; height:150px; overflow-y:auto; margin-bottom:1rem; }
+#atc-log .tx { color:#76ff8a; font-family:"B612 Mono"; }
+#atc-log .rx { color:#8ab6ff; font-family:"B612 Mono"; }
+.freq { display:inline-block; padding:0.25rem 0.5rem; background:#091c37; border:1px solid #1b3e6d; border-radius:4px; font-family:"B612 Mono"; }
 
-/* Plane marker (DivIcon) */
-.plane-icon {
-  width: 32px; height: 32px;
-  transform-origin: 50% 50%;
-  filter: drop-shadow(0 0 2px rgba(0,0,0,0.6));
-}
-.plane-icon svg { width: 32px; height: 32px; display: block; }
+/* Controls panel */
+#controls-grid { display:grid; gap:1rem; }
+.ctrl-row { display:flex; align-items:center; gap:0.5rem; }
+input[type=range] { flex:1; }
+.badge { font-family:"B612 Mono"; background:#122d57; border:1px solid #2b5587; border-radius:4px; padding:0.25rem 0.5rem; }
