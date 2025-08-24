@@ -78,3 +78,9 @@ button:hover { filter:brightness(1.1); }
 .ctrl-row { display:flex; align-items:center; gap:0.5rem; }
 input[type=range] { flex:1; }
 .badge { font-family:"B612 Mono"; background:#122d57; border:1px solid #2b5587; border-radius:4px; padding:0.25rem 0.5rem; }
+
+#map {
+  height: 300px;
+  border: 1px solid #1b3e6d;
+  border-radius: 6px;
+}
