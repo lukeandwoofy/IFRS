@@ -487,3 +487,176 @@ function renderPedestal() {
       <button id="gear">${flight.gearDown?'Gear Down':'Gear Up'}</button>
     </div>
     <div style="display:flex; align-items:center; gap:.5
+    /* ========= Overhead Panel ========= */
+function blockSwitch(label,id,on){
+  return `
+    <div class="switch" style="display:flex; align-items:center; gap:.5rem;">
+      <span>${label}</span>
+      <button id="${id}">${on?'ON':'OFF'}</button>
+    </div>`;
+}
+function blockToggle(label,id,on,onTxt='ON',offTxt='OFF'){
+  return `
+    <div class="switch" style="display:flex; align-items:center; gap:.5rem;">
+      <span>${label}</span>
+      <button id="${id}">${on?onTxt:offTxt}</button>
+    </div>`;
+}
+
+function renderOverheadPanel() {
+  const el = document.getElementById('OVERHEAD');
+  el.innerHTML = `
+    <h3>Overhead Panel</h3>
+    ${blockSwitch('APU MASTER','oh-apu-master', flight.apu.master)}
+    ${blockSwitch('APU START','oh-apu-start',  flight.apu.avail)}
+    ${blockSwitch('APU BLEED','oh-apu-bleed',  flight.apu.bleed)}
+  `;
+  document.getElementById('oh-apu-master').onclick = () => { flight.apu.master=!flight.apu.master; renderOverheadPanel(); };
+  document.getElementById('oh-apu-start').onclick  = () => { if(!flight.apu.master) return;
+    setTimeout(()=>{ flight.apu.avail = true; renderOverheadPanel(); checkEngineSpool(); }, 800);
+  };
+  document.getElementById('oh-apu-bleed').onclick  = () => { flight.apu.bleed=!flight.apu.bleed; renderOverheadPanel(); checkEngineSpool(); };
+}
+
+/* ========= Engine Panel ========= */
+function renderEnginePanel() {
+  const el = document.getElementById('ENGINE');
+  el.innerHTML = `
+    <h3>Engine Panel</h3>
+    ${blockSwitch('IGN/START','btn-ign', flight.eng.ign)}
+    ${blockSwitch('ENG1 MASTER','btn-eng1', flight.eng.master1)}
+    ${blockSwitch('ENG2 MASTER','btn-eng2', flight.eng.master2)}
+  `;
+  document.getElementById('btn-ign').onclick  = () => { flight.eng.ign=!flight.eng.ign; renderEnginePanel(); checkEngineSpool(); };
+  document.getElementById('btn-eng1').onclick = () => { flight.eng.master1=!flight.eng.master1; renderEnginePanel(); checkEngineSpool(); };
+  document.getElementById('btn-eng2').onclick = () => { flight.eng.master2=!flight.eng.master2; renderEnginePanel(); checkEngineSpool(); };
+}
+
+/* ========= Autopilot (FCU) ========= */
+function renderAutopilotPanel() {
+  const el = document.getElementById('AP');
+  el.innerHTML = `
+    <h3>Autopilot</h3>
+    SPD: <input id="spd" type="number" value="${flight.ap.speedKts}"><br>
+    ALT: <input id="alt" type="number" value="${flight.ap.altFt}"><br>
+    VS:  <input id="vs"  type="number" value="${flight.ap.vsFpm}"><br>
+    HDG: <input id="hdg" type="number" value="${flight.ap.hdgDeg}">
+  `;
+  ['spd','alt','vs','hdg'].forEach(id=>{
+    document.getElementById(id).onchange = e => { flight.ap[`${id==='spd'?'speedKts':id==='alt'?'altFt':id==='vs'?'vsFpm':'hdgDeg'}`] = parseInt(e.target.value,10); };
+  });
+}
+
+/* ========= PFD ========= */
+function renderAltPanel() {
+  const el = document.getElementById('ALT');
+  el.innerHTML = `
+    <h3>PFD</h3>
+    <canvas id="attitude" width="300" height="260" style="background:#071b34;"></canvas>
+    <div>IAS: <span id="speed">000</span></div>
+    <div>ALT: <span id="alt">00000</span></div>
+    <div>VS:  <span id="vs">0000</span></div>
+  `;
+  setupInstruments();
+}
+
+/* ========= ATC Panel ========= */
+function renderATCPanel() {
+  const el = document.getElementById('ATC');
+  el.innerHTML = `<h3>ATC</h3><div id="atc-log"></div>`;
+}
+
+/* ========= Flight Info Panel ========= */
+function renderFlightInfoPanel() {
+  const el = document.getElementById('FLIGHTINFO');
+  el.innerHTML = `
+    <h3>Flight Info</h3>
+    <div>From: ${flight.origin}</div>
+    <div>To: ${flight.dest}</div>
+    <div id="map" style="height:300px;"></div>
+  `;
+}
+
+/* ========= Aircraft Info Panel ========= */
+function renderAircraftInfoPanel() {
+  const el = document.getElementById('AIRCRAFTINFO');
+  el.innerHTML = `<h3>Aircraft</h3><div>Type: ${flight.plane}</div>`;
+}
+
+/* ========= Instruments ========= */
+function setupInstruments() {
+  attCanvas = document.getElementById('attitude');
+  if (!attCanvas) return;
+  attCtx = attCanvas.getContext('2d');
+  speedEl = document.getElementById('speed');
+  altEl   = document.getElementById('alt');
+  vsEl    = document.getElementById('vs');
+}
+
+/* ========= Map ========= */
+let map, routeLine, planeMarker;
+function setupMap() {
+  const o=AirportDB[flight.origin], d=AirportDB[flight.dest];
+  map = L.map('map');
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+  routeLine = L.polyline([[o.lat,o.lon],[d.lat,d.lon]], { color: '#3ec1ff', weight: 3 }).addTo(map);
+  map.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
+  const icon = L.divIcon({ className: 'plane-icon', html: '✈️', iconSize: [24, 24] });
+  planeMarker = L.marker([o.lat,o.lon], { icon }).addTo(map);
+}
+
+/* ========= Draw PFD ========= */
+function drawPFD(ctx, w, h, pitchDeg, rollDeg) {
+  ctx.clearRect(0,0,w,h);
+  ctx.save();
+  ctx.translate(w/2, h/2);
+  ctx.rotate(-degToRad(rollDeg));
+  const y = pitchDeg * 4;
+  ctx.fillStyle = '#2d76c2';
+  ctx.fillRect(-w, -h*2 + y, w*2, h*2);
+  ctx.fillStyle = '#a66a2e';
+  ctx.fillRect(-w, y, w*2, h*2);
+  ctx.strokeStyle = '#fff';
+  ctx.beginPath();
+  ctx.moveTo(-w, y);
+  ctx.lineTo(w, y);
+  ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle = '#ffef5a';
+  ctx.beginPath();
+  ctx.moveTo(w/2-40,h/2);
+  ctx.lineTo(w/2+40,h/2);
+  ctx.stroke();
+}
+
+/* ========= Engine Spool Gate ========= */
+function checkEngineSpool() {
+  const pumps = (flight.fuel.pumpL || flight.fuel.pumpCTR || flight.fuel.pumpR);
+  const apuOK = (flight.apu.master && flight.apu.avail && flight.apu.bleed);
+  const ignOK = flight.eng.ign;
+  const master = (flight.eng.master1 || flight.eng.master2);
+  if (pumps && apuOK && ignOK && master) {
+    flight.enginesRunning = true;
+    ensureWhineStarted();
+  }
+}
+
+/* ========= Loop ========= */
+function loop(now) {
+  const dt = (now - lastTime)/1000;
+  lastTime = now;
+
+  if (timerEl && flight._startTime!=null) {
+    const e = now - flight._startTime;
+    const h = Math.floor(e/3600000),
+          m = Math.floor((e%3600000)/60000),
+          s = Math.floor((e%60000)/1000);
+    timerEl.textContent = `${pad(h)}:${pad(m)}:${pad(s)}`;
+  }
+
+  if (!flight.enginesRunning) {
+    flight.tasKts = Math.max(0, flight.tasKts - 10*dt);
+    flight.vsFpm  = 0;
+  } else {
+    const apOn = flight.ap.ap1 || flight.ap.ap2;
+    let spdTarget = apOn ? flight.ap.speedKts : flight.throttle * 
