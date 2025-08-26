@@ -452,6 +452,13 @@ export function showCockpit() {
   rafId && cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(loop);
 }
+//"Open Map button
+document.getElementById('right-pane').insertAdjacentHTML(
+  'afterbegin',
+  `<div style="padding:.5rem; border-bottom:1px solid #1b3e6d;">
+     <button onclick="window.open('map.html','mapWin')">Open Map</button>
+   </div>`
+);
 
 function setupTabs() {
   const tabs = document.getElementById('tabs');
