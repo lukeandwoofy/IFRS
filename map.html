@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>IFRS Route Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #0a2346;
+      color: #fff;
+      font-family: sans-serif;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Example AirportDB — replace with your real one if you can
+    const AirportDB = {
+      LPPT:{name:"Lisbon",  lat:38.7813, lon:-9.1359},
+      EGKK:{name:"Gatwick", lat:51.1537, lon:-0.1821},
+      EGLL:{name:"Heathrow",lat:51.4706, lon:-0.4619},
+      KIAD:{name:"Dulles",  lat:38.9531, lon:-77.4565},
+      KJFK:{name:"JFK",     lat:40.6413, lon:-73.7781},
+      KLAX:{name:"LAX",     lat:33.9416, lon:-118.4085}
+    };
+
+    // Hard‑coded test route
+    const originCode = 'LPPT';
+    const destCode   = 'EGKK';
+
+    const origin = AirportDB[originCode];
+    const dest   = AirportDB[destCode];
+
+    // Lerp helper
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function lerpLatLon(a, b, t) {
+      return { lat: lerp(a.lat, b.lat, t), lon: lerp(a.lon, b.lon, t) };
+    }
+
+    // Init Leaflet map
+    const map = L.map('map');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    // Draw route line
+    const routeLine = L.polyline([[origin.lat, origin.lon], [dest.lat, dest.lon]], { color: '#3ec1ff', weight: 3 }).addTo(map);
+    map.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
+
+    // Add markers for origin/dest
+    L.marker([origin.lat, origin.lon]).addTo(map).bindPopup(`${originCode} — ${origin.name}`);
+    L.marker([dest.lat, dest.lon]).addTo(map).bindPopup(`${destCode} — ${dest.name}`);
+
+    // Aircraft marker
+    const planeIcon = L.divIcon({ className: 'plane-icon', html: '✈️', iconSize: [24, 24] });
+    const planeMarker = L.marker([origin.lat, origin.lon], { icon: planeIcon }).addTo(map);
+
+    // Demo progress variable (0 → 1)
+    let t = 0;
+    setInterval(()=>{
+      t += 0.005; // adjust speed here
+      if (t > 1) t = 1;
+      const pos = lerpLatLon(origin, dest, t);
+      planeMarker.setLatLng([pos.lat, pos.lon]);
+    }, 100);
+  </script>
+</body>
+</html>
