@@ -367,33 +367,6 @@ function renderPedestal() {
   };
 }
 
-/* ========= Init Flight ========= */
-function initFlight() {
-  const o=AirportDB[flight.origin], d=AirportDB[flight.dest];
-  if (o&&d) {
-    const dx=d.lon-o.lon, dy=d.lat-o.lat;
-    flight.hdgDeg = wrap360(Math.atan2(dx,dy)*180/Math.PI);
-    flight.ap.hdgDeg = flight.hdgDeg;
-  }
-  // Fuel setup
-  const caps = { 'A330-300':139000, 'A320neo':27000, '737 MAX 10':26000, 'B-17':8000 };
-  flight.fuelMax = caps[flight.plane]||20000;
-  flight.fuelKg  = flight.fuelMax;
-  // Cold & Dark gating
-  flight.enginesRunning = false;
-  // Reset flight state
-  flight.tasKts=0; flight.altFt=0; flight.vsFpm=0;
-  flight.rollDeg=0; flight.pitchDeg=0;
-  flight.throttle=0; flight.flaps=0; flight.gearDown=true; flight.rudder=0; flight.trim=0;
-  // Systems
-  Object.assign(flight.eng, { master1:false, master2:false, ign:false, fire1:false, fire2:false });
-  Object.assign(flight.apu, { master:false, start:false, bleed:false, avail:false });
-  Object.assign(flight.fuel,{ pumpL:false, pumpR:false, pumpCTR:false, xfeed:false });
-  Object.assign(flight.lights,{ beacon:false, strobe:false, land:false, taxi:false, logo:false, wing:false, seatbelt:false });
-  Object.assign(flight.ap,{ speedKts:160, altFt:6000, vsFpm:1200, hdgDeg:flight.hdgDeg, ap1:false, ap2:false });
-  flight.t = 0;
-}
-
 /* ========= Cockpit ========= */
 let attCanvas, attCtx, speedEl, altEl, vsEl, timerEl;
 let lastTime=0, rafId=0;
