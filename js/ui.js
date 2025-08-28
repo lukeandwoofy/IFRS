@@ -375,16 +375,6 @@ document.getElementById('right-pane').insertAdjacentHTML(
    </div>`
 );
 
-function setupTabs() {
-  const tabs = document.getElementById('tabs');
-  tabs.querySelectorAll('.tab').forEach(btn=>{
-    btn.onclick = () => {
-      tabs.querySelectorAll('.tab').forEach(t=>{t.classList.remove('active'); t.style.background='#0d2a4e';});
-      document.querySelectorAll('.panel').forEach(p=>p.style.display='none');
-      btn.classList.add('active'); btn.style.background='#1e3a5f';
-      document.getElementById(tn.dataset.panel).style.display='block';
-      play(A.click());
-    };
   });
 }
 
