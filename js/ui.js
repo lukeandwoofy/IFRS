@@ -375,7 +375,7 @@ document.getElementById('right-pane').insertAdjacentHTML(
    </div>`
 );
 
-}
+
 
 /* ========= Pedestal ========= */
 function renderPedestal() {
