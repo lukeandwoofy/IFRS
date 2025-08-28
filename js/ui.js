@@ -375,7 +375,6 @@ document.getElementById('right-pane').insertAdjacentHTML(
    </div>`
 );
 
-  });
 }
 
 /* ========= Pedestal ========= */
