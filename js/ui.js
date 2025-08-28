@@ -367,64 +367,6 @@ function renderPedestal() {
   };
 }
 
-/* ========= Cockpit ========= */
-let attCanvas, attCtx, speedEl, altEl, vsEl, timerEl;
-let lastTime=0, rafId=0;
-
-export function showCockpit() {
-  show('cockpit');
-  screens.cockpit.innerHTML = `
-    <div id="cockpit-title" style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; background:#0a2346; border:1px solid #1b3e6d; border-radius:6px; padding:.5rem; margin-bottom:.5rem;">
-      <div style="display:flex; gap:.5rem; align-items:center">
-        <strong>${flight.plane}</strong>
-        <span style="opacity:.8">${flight.livery||''}</span>
-        <span style="font-family:monospace; background:#122d57; border:1px solid #2b5587; border-radius:4px; padding:.1rem .4rem;">${flight.origin} → ${flight.dest}</span>
-      </div>
-      <div style="display:flex; gap:.5rem; align-items:center">
-        <span id="flight-timer" style="font-family:monospace; background:#122d57; border:1px solid #2b5587; border-radius:4px; padding:.1rem .4rem;">00:00:00</span>
-        <button id="btn-audio">Audio</button>
-        <button id="btn-night">Night</button>
-      </div>
-    </div>
-    <div style="display:grid; grid-template-columns:320px 1fr; gap:.5rem; height:calc(100vh - 100px);">
-      <div id="left-pane" style="background:#081e3a; border:1px solid #1b3e6d; border-radius:6px; padding:.5rem; overflow:auto;"></div>
-      <div id="right-pane" style="background:#081e3a; border:1px solid #1b3e6d; border-radius:6px; display:flex; flex-direction:column;">
-        <div id="tabs" style="display:flex; border-bottom:1px solid #1b3e6d;">
-          ${[
-            ['OVERHEAD','Overhead Panel'],
-            ['ENGINE','Engine Panel'],
-            ['AP','Autopilot Panel'],
-            ['ALT','Altimeter'],
-            ['ATC','ATC Panel'],
-            ['FLIGHTINFO','Flight Info'],
-            ['AIRCRAFTINFO','Aircraft Info']
-          ].map(([id,label],i)=>`<div class="tab${i===0?' active':''}" data-panel="${id}" style="flex:1; text-align:center; padding:.5rem; cursor:pointer; background:${i===0?'#1e3a5f':'#0d2a4e'}; border-right:1px solid #1b3e6d;">${label}</div>`).join('')}
-        </div>
-        ${['OVERHEAD','ENGINE','AP','ALT','ATC','FLIGHTINFO','AIRCRAFTINFO'].map((id,i)=>`
-          <div id="${id}" class="panel${i===0?' active':''}" style="display:${i===0?'block':'none'}; overflow:auto; padding:.5rem;"></div>
-        `).join('')}
-      </div>
-    </div>
-  `;
-  document.getElementById('btn-audio').onclick = () => { ensureWhineStarted(); play(A.click()); };
-  document.getElementById('btn-night').onclick = () => { document.body.classList.toggle('night'); play(A.click()); };
-  renderPedestal();
-  setupTabs();
-  renderOverheadPanel();
-  renderEnginePanel();
-  renderAutopilotPanel();
-  renderAltPanel();
-  renderATCPanel();
-  renderFlightInfoPanel();
-  renderAircraftInfoPanel();
-  setupInstruments();
-  setupMap(); // initialise the directional map
-  timerEl = document.getElementById('flight-timer');
-  flight._startTime = performance.now();
-  lastTime = performance.now();
-  rafId && cancelAnimationFrame(rafId);
-  rafId = requestAnimationFrame(loop);
-}
 //"Open Map button
 document.getElementById('right-pane').insertAdjacentHTML(
   'afterbegin',
