@@ -211,7 +211,8 @@ export async function showSetup() {
       <label>Livery</label>
       <select id="sel-livery">${(lvr[flight.plane]||[]).map(x=>`<option>${x}</option>`).join('')}</select>
       <label>Origin</label>
-      <select      <label>Destination</label>
+      <select id="sel-origin">${apt.map(x=>`<option>${x}</option>`).join('')}</select>
+      <label>Destination</label>
       <select id="sel-dest">${apt.map(x=>`<option>${x}</option>`).join('')}</select>
       <label><input id="chk-gate" type="checkbox"> Cold & Dark at Gate</label>
       <label><input id="chk-atc" type="checkbox" checked> Include ATC</label>
@@ -299,15 +300,23 @@ export function showCockpit() {
   document.getElementById('btn-night').onclick = () => { document.body.classList.toggle('night'); play(A.click()); };
   renderPedestal();
   setupTabs();
-  renderOverheadPanel();
-  renderEnginePanel();
-  renderAutopilotPanel();
-  renderAltPanel();
-  renderATCPanel();
-  renderFlightInfoPanel();
-  renderAircraftInfoPanel();
+  // If these functions are not defined elsewhere, add empty stubs or implement as needed
+  if (typeof renderOverheadPanel === "function") renderOverheadPanel();
+  if (typeof renderEnginePanel === "function") renderEnginePanel();
+  if (typeof renderAutopilotPanel === "function") renderAutopilotPanel();
+  if (typeof renderAltPanel === "function") renderAltPanel();
+  if (typeof renderATCPanel === "function") renderATCPanel();
+  if (typeof renderFlightInfoPanel === "function") renderFlightInfoPanel();
+  if (typeof renderAircraftInfoPanel === "function") renderAircraftInfoPanel();
   setupInstruments();
-  setupMap(); // initialise the directional map
+  setupMap();
+  // Insert Open Map button after DOM is ready
+  document.getElementById('right-pane').insertAdjacentHTML(
+    'afterbegin',
+    `<div style="padding:.5rem; border-bottom:1px solid #1b3e6d;">
+       <button onclick="window.open('map.html','mapWin')">Open Map</button>
+     </div>`
+  );
   timerEl = document.getElementById('flight-timer');
   flight._startTime = performance.now();
   lastTime = performance.now();
@@ -348,33 +357,43 @@ function renderPedestal() {
       <div style="flex:1;">Gear</div>
       <button id="gear">${flight.gearDown?'Gear Down':'Gear Up'}</button>
     </div>
-    <div style="display:flex; align-items:center; gap:.5
-          <label>Destination</label>
-      <select id="sel-dest">${apt.map(x=>`<option>${x}</option>`).join('')}</select>
-      <label><input id="chk-gate" type="checkbox"> Cold & Dark at Gate</label>
-      <label><input id="chk-atc" type="checkbox" checked> Include ATC</label>
-      <button id="btn-fly">Fly!</button>
-    </div>
   `;
-  document.getElementById('btn-fly').onclick = () => {
-    flight.livery   = document.getElementById('sel-livery').value;
-    flight.origin   = document.getElementById('sel-origin').value;
-    flight.dest     = document.getElementById('sel-dest').value;
-    flight.coldDark = document.getElementById('chk-gate').checked;
-    flight.atcIncluded = document.getElementById('chk-atc').checked;
-    initFlight();
-    showCockpit();
-  };
+  // Throttle event
+  const thr = document.getElementById('thr');
+  const thrVal = document.getElementById('thr-val');
+  if (thr) {
+    thr.oninput = e => {
+      flight.throttle = clamp(e.target.value / 100, 0, 1);
+      thrVal.textContent = `${Math.round(flight.throttle*100)}%`;
+      play(A.click());
+    };
+  }
+  // Flaps events
+  const flapsDec = document.getElementById('flaps-dec');
+  const flapsInc = document.getElementById('flaps-inc');
+  const flapsVal = document.getElementById('flaps-val');
+  if (flapsDec && flapsInc && flapsVal) {
+    flapsDec.onclick = () => {
+      flight.flaps = clamp(flight.flaps - 1, 0, 5);
+      flapsVal.textContent = flight.flaps;
+      play(A.flap());
+    };
+    flapsInc.onclick = () => {
+      flight.flaps = clamp(flight.flaps + 1, 0, 5);
+      flapsVal.textContent = flight.flaps;
+      play(A.flap());
+    };
+  }
+  // Gear event
+  const gearBtn = document.getElementById('gear');
+  if (gearBtn) {
+    gearBtn.onclick = () => {
+      flight.gearDown = !flight.gearDown;
+      gearBtn.textContent = flight.gearDown ? 'Gear Down' : 'Gear Up';
+      play(A.click());
+    };
+  }
 }
-
-//"Open Map button
-document.getElementById('right-pane').insertAdjacentHTML(
-  'afterbegin',
-  `<div style="padding:.5rem; border-bottom:1px solid #1b3e6d;">
-     <button onclick="window.open('map.html','mapWin')">Open Map</button>
-   </div>`
-);
-
 
 /* ========= Engine Panel ========= */
 function renderEnginePanel() {
@@ -513,8 +532,35 @@ function loop(now) {
   }
 
   if (!flight.enginesRunning) {
-    flight.tasKts = Math.max(0, flight.tasKts - 10*dt);
-    flight.vsFpm  = 0;
+    flight.tasKts = Math.max(0, flight.tasKts - 10 * dt);
+    flight.vsFpm = 0;
   } else {
     const apOn = flight.ap.ap1 || flight.ap.ap2;
-    let spdTarget = apOn ? flight.ap.speedKts : flight.throttle 
+    let spdTarget = apOn ? flight.ap.speedKts : flight.throttle * 300;
+    // Simple physics: accelerate/decelerate towards target speed
+    flight.tasKts += clamp(spdTarget - flight.tasKts, -20, 20) * dt;
+    // Altitude and VS
+    if (apOn) {
+      flight.vsFpm += clamp(flight.ap.vsFpm - flight.vsFpm, -500, 500) * dt;
+    } else {
+      flight.vsFpm = 0;
+    }
+    flight.altFt += flight.vsFpm * dt / 60;
+    // Simple pitch/roll simulation
+    flight.pitchDeg = clamp(flight.vsFpm / 100, -10, 10);
+    flight.rollDeg = clamp((flight.ap.hdgDeg - flight.hdgDeg + 540) % 360 - 180, -30, 30) * (apOn ? 0.1 : 0);
+    // Fuel burn
+    flight.fuelKg = Math.max(0, flight.fuelKg - flight.tasKts * dt * 0.1);
+  }
+
+  // Update instruments if available.
+  if (speedEl) speedEl.textContent = pad(Math.round(flight.tasKts), 3);
+  if (altEl) altEl.textContent = pad(Math.round(flight.altFt), 5);
+  if (vsEl) vsEl.textContent = pad(Math.round(flight.vsFpm), 4);
+  if (attCtx && attCanvas) drawPFD(attCtx, attCanvas.width, attCanvas.height, flight.pitchDeg, flight.rollDeg);
+
+  // Optionally update map marker if needed
+  // if (planeMarker && map) planeMarker.setLatLng([currentLat, currentLon]);
+
+  rafId = requestAnimationFrame(loop);
+}
