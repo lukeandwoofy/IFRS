@@ -376,59 +376,6 @@ document.getElementById('right-pane').insertAdjacentHTML(
 );
 
 
-
-/* ========= Pedestal ========= */
-function renderPedestal() {
-  const el = document.getElementById('left-pane');
-  el.innerHTML = `
-    <h3 style="margin:.25rem 0 .5rem;">Controls</h3>
-    <div style="display:flex; align-items:center; gap:.5rem; margin:.4rem 0;">
-      <div style="flex:1;">Throttle</div>
-      <input id="thr" type="range" min="0" max="100" value="${Math.round(flight.throttle*100)}" style="flex:2">
-      <span id="thr-val">${Math.round(flight.throttle*100)}%</span>
-    </div>
-    <div style="display:flex; align-items:center; gap:.5rem; margin:.4rem 0;">
-      <div style="flex:1;">Flaps</div>
-      <button id="flaps-dec">-</button>
-      <span id="flaps-val">${flight.flaps}</span>
-      <button id="flaps-inc">+</button>
-    </div>
-    <div style="display:flex; align-items:center; gap:.5rem; margin:.4rem 0;">
-      <div style="flex:1;">Gear</div>
-      <button id="gear">${flight.gearDown?'Gear Down':'Gear Up'}</button>
-    </div>
-    <div style="display:flex; align-items:center; gap:.5
-    /* ========= Overhead Panel ========= */
-function blockSwitch(label,id,on){
-  return `
-    <div class="switch" style="display:flex; align-items:center; gap:.5rem;">
-      <span>${label}</span>
-      <button id="${id}">${on?'ON':'OFF'}</button>
-    </div>`;
-}
-function blockToggle(label,id,on,onTxt='ON',offTxt='OFF'){
-  return `
-    <div class="switch" style="display:flex; align-items:center; gap:.5rem;">
-      <span>${label}</span>
-      <button id="${id}">${on?onTxt:offTxt}</button>
-    </div>`;
-}
-
-function renderOverheadPanel() {
-  const el = document.getElementById('OVERHEAD');
-  el.innerHTML = `
-    <h3>Overhead Panel</h3>
-    ${blockSwitch('APU MASTER','oh-apu-master', flight.apu.master)}
-    ${blockSwitch('APU START','oh-apu-start',  flight.apu.avail)}
-    ${blockSwitch('APU BLEED','oh-apu-bleed',  flight.apu.bleed)}
-  `;
-  document.getElementById('oh-apu-master').onclick = () => { flight.apu.master=!flight.apu.master; renderOverheadPanel(); };
-  document.getElementById('oh-apu-start').onclick  = () => { if(!flight.apu.master) return;
-    setTimeout(()=>{ flight.apu.avail = true; renderOverheadPanel(); checkEngineSpool(); }, 800);
-  };
-  document.getElementById('oh-apu-bleed').onclick  = () => { flight.apu.bleed=!flight.apu.bleed; renderOverheadPanel(); checkEngineSpool(); };
-}
-
 /* ========= Engine Panel ========= */
 function renderEnginePanel() {
   const el = document.getElementById('ENGINE');
