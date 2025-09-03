@@ -517,4 +517,4 @@ function loop(now) {
     flight.vsFpm  = 0;
   } else {
     const apOn = flight.ap.ap1 || flight.ap.ap2;
-    let spdTarget = apOn ? flight.ap.speedKts : flight.throttle * 
+    let spdTarget = apOn ? flight.ap.speedKts : flight.throttle 
