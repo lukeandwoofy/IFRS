@@ -1,790 +1,764 @@
-// IFRS Glass Cockpit UI Implementation
-// All Panels, ND, Leaflet Integration, MCDU Full (INIT A, F-PLAN, PERF), Cold & Dark, Autopilot (LNAV/VNAV), ATC Stub
-// Author: IFRS Instrument Flight Rules Simulator Team (2025)
-// Strict mode, ES2021+ syntax. Fully modular, ready to drop into IFRS project.
+// IFRS Flight Simulator: Complete Cockpit UI
+// Updated: September 2025
+// All panels, ND, Leaflet map, MCDU (INIT A, F-PLAN, PERF), Cold & Dark, AP, Fuel, AH, and ATC Stub
 
-"use strict";
+(() => {
+  // ---------------------------
+  // Sim State Model and Helpers
+  // ---------------------------
+  const state = {
+    // Electrical
+    batteryOn: false,
+    extPwrOn: false,
+    apuOn: false,
+    apuAvail: false,
+    apuGenOn: false,
+    busPowered: false,
 
-/* ---- STATE MANAGEMENT SECTION ---- */
+    // IRS/Avionics
+    irsAligning: false,
+    irsAligned: false,
+    avionicsOn: false,
 
-// Top-level state object
-const state = {
-  aircraft: {
-    powered: false,
-    coldAndDark: true,
-    overhead: {
-      battery: false,
-      externalPower: false,
-      apuAvailable: false,
-      apuOn: false,
-      fuelPumps: false,
-      hydraulics: false,
-      lights: {
-        beacon: false,
-        nav: false,
-        strobe: false,
-        landing: false,
-        taxi: false,
-      },
-      airConditioning: false,
-    },
-    engines: [
-      { master: false, running: false, n1: 0, n2: 0, egt: 0, fuelFlow: 0 },
-      { master: false, running: false, n1: 0, n2: 0, egt: 0, fuelFlow: 0 },
-    ],
-    fuel: {
-      quantity: 10000,    // in kilograms
-      capacity: 10000,
-      burnRate: 0,        // kg/h, updated dynamically
-    },
-    flight: {
-      altitude: 0,
-      vs: 0,
+    // Fuel/Engine
+    eng1Start: false,
+    eng2Start: false,
+    eng1Running: false,
+    eng2Running: false,
+    fuelTankL: 5500, // kg
+    fuelTankR: 5500, // kg
+    fuelBurnRate: 2.8, // kg/s per engine at cruise
+
+    // Panel Light
+    emerLights: false,
+
+    // Autopilot
+    apOn: false,
+    apMode: 'OFF', // OFF, HDG, ALT, SPD, LNAV, VNAV
+    apTarget: {
       hdg: 0,
-      ias: 0,
-      tas: 0,
-      gs: 0,
-      pitch: 0,
-      bank: 0,
-      yaw: 0,
-      lat: 0,
-      lon: 0,
+      alt: 10000,
+      spd: 250
     },
-    autopilot: {
-      enabled: false,
-      lnav: false,
-      vnav: false,
-      heading: 0,
-      altSel: 0,
-      speedSel: 0,
-      vsSel: 0,
-      mode: "OFF",      // "HDG", "LNAV", etc.
-      armed: {
-        lnav: false,
-        vnav: false,
-      },
-    },
-    fms: {
-      flightPlan: [],      // array of waypoints (lat,lon,alt)
-      perf: {},
-      initA: {
-        from: "",    // ICAO
-        to: "",      // ICAO
-        flightNumber: "",
-        costIndex: "",
-        cruiseLevel: "",
-        cruiseTemp: "",
-      },
-      perfPages: {
-        current: "TAKEOFF", // "TAKEOFF", "CLIMB", etc.
-        data: {},
-      },
-      position: 0,   // index in FPLN
-    },
+    lnavActive: false,
+    vnavActive: false,
+
+    // Flight Dynamics
+    attitude: { pitch: 0, roll:0, slip:0 },
+    heading: 0,
+    airspeed: 0,
+    vspeed: 0,
+    altitude: 0,
+
+    // Navigation & Route
+    position: { lat: 51.5, lon: -0.12 }, // Default: London
+    waypoints: [],
+    routeIndex: 0, // Active waypoint
+    flightPlanLoaded: false,
+
+    // Time
+    time: 0,
+
+    // MCDU Data
     mcdu: {
-      page: "MENU", // "INITA", "FPLN", "PERF", etc.
-      scratchpad: "",
-      selectedField: null,
+      INIT: {
+        flightNo: '', from: '', to: '',
+        costIdx: 0, crzFL: 350, crzTemp: -56, wind: '---'
+      },
+      FPLAN: [], // Array of waypoints: {fix, alt, spd}
+      PERF: {
+        zfw: 55.4, res: 2, ci: 50, takeoffFlaps: '1+F', v1:131, vr:135, v2:140
+      },
     },
-    atc: {
-      lastMessage: "",
-      stubEnabled: true,
-    },
-    isInitialized: false, // for startup
-  }
-};
-
-/* ---- SUBSCRIBERS & STATE MANAGEMENT ---- */
-
-const subscribers = [];
-
-function subscribe(fn) {
-  subscribers.push(fn);
-}
-function notify() {
-  subscribers.forEach(fn => fn(state));
-}
-function setState(mutator) {
-  mutator(state);
-  notify();
-}
-
-/* ---- HELPER FUNCTIONS ---- */
-
-// Clamp a value between min and max
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
-}
-
-// Format number to n decimals
-function fmt(n, d = 0) {
-  return Number.parseFloat(n).toFixed(d);
-}
-
-// ICAO Uppercase validation
-function validIcao(s) {
-  return !!/^[A-Z]{4}$/.test((s || "").toUpperCase());
-}
-
-// Simplified fuel burn calculation (derate based on N1)
-function computeFuelBurn(engine) {
-  if (!engine.running || engine.n1 < 10) return 0;
-  const base = 2500; // kg/hr at 100% N1
-  return base * (engine.n1 / 100);
-}
-
-// MCDU Field Text Helper
-function mcduLine(str, len = 24) {
-  // Pads/truncates string for display
-  return (str + " ".repeat(len)).slice(0, len);
-}
-
-// Geodetic calculations for ND, move aircraft
-function moveAircraft(lat, lon, hdg, distNm) {
-  const R = 3440.07; // nautical miles earth radius
-  const hdgRad = hdg * (Math.PI / 180);
-  const d = distNm / R;
-  const lat1 = lat * (Math.PI / 180);
-  const lon1 = lon * (Math.PI / 180);
-  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) +
-    Math.cos(lat1) * Math.sin(d) * Math.cos(hdgRad));
-  const lon2 = lon1 + Math.atan2(
-    Math.sin(hdgRad) * Math.sin(d) * Math.cos(lat1),
-    Math.cos(d) - Math.sin(lat1) * Math.sin(lat2)
-  );
-  return {
-    lat: lat2 * (180 / Math.PI),
-    lon: lon2 * (180 / Math.PI),
+    mcduPage: 'INIT',
+    // ATC
+    atcLog: [],
+    // Panel UI (for focus highlight)
+    selectedPanel: 'PFD'
   };
-}
 
-// Simple color util
-function getBatteryColor(on) {
-  return on ? "#51ff55" : "#ccc";
-}
-
-/* ---- PANEL RENDERING FUNCTIONS ---- */
-
-function renderOverheadPanel(el, st) {
-  el.innerHTML = `
-    <h3>Overhead Panel</h3>
-    <div>
-      <button id="battery-btn" style="background:${getBatteryColor(st.battery)}">Battery</button>
-      <button id="extpower-btn" ${st.battery ? "" : "disabled"}>${st.externalPower ? "EXT PWR ON" : "EXT PWR OFF"}</button>
-    </div>
-    <div>
-      <button id="apu-btn" ${st.battery ? "" : "disabled"}>${st.apuOn ? "APU ON" : "APU OFF"}</button>
-      <span>APU AVAILABLE: <strong>${st.apuAvailable ? "✔" : "✖"}</strong></span>
-    </div>
-    <div>
-      <label><input type="checkbox" id="fuelPumps-btn" ${st.fuelPumps ? "checked" : ""}> Fuel Pumps</label>
-      <label><input type="checkbox" id="hydraulics-btn" ${st.hydraulics ? "checked" : ""}> Hydraulics</label>
-    </div>
-    <div>
-      <fieldset>
-        <legend>Lighting</legend>
-        ${Object.entries(st.lights).map(([k, v]) =>
-          `<label><input type="checkbox" class="light-btn" data-light="${k}" ${v ? "checked" : ""}> ${k.charAt(0).toUpperCase() + k.slice(1)}</label>`
-        ).join(" ")}
-      </fieldset>
-    </div>
-    <div>
-      <label><input type="checkbox" id="ac-btn" ${st.airConditioning ? "checked" : ""}> Air Conditioning</label>
-    </div>
-  `;
-}
-
-function renderEnginePanel(el, st, engines, fuel) {
-  el.innerHTML = `
-    <h3>Engine Panel</h3>
-    ${engines.map((eng, idx) => `
-      <div class="engine">
-        <button id="eng-master-${idx}" ${fuel.fuelPumps ? "" : "disabled"}>${eng.master ? "MASTER ON" : "MASTER OFF"}</button>
-        <span>N1: ${fmt(eng.n1,1)}%</span>
-        <span>N2: ${fmt(eng.n2,1)}%</span>
-        <span>EGT: ${fmt(eng.egt,0)}°C</span>
-        <span>Fuel Flow: ${fmt(eng.fuelFlow,0)} kg/h</span>
-        <span>Status: ${eng.running ? "RUNNING" : "STOPPED"}</span>
-      </div>
-    `).join("")}
-    <div>Fuel: ${fmt(fuel.quantity,0)} kg / ${fmt(fuel.capacity,0)} kg</div>
-  `;
-}
-
-function renderAutopilotPanel(el, ap, fms) {
-  el.innerHTML = `
-    <h3>Autopilot Panel (AP)</h3>
-    <div>
-      <label>HDG: <input id="ap-hdg" type="number" value="${fmt(ap.heading,0)}" min="0" max="359"></label>
-      <label>ALT: <input id="ap-alt" type="number" value="${fmt(ap.altSel,0)}" min="0" max="45000"></label>
-      <label>SPD: <input id="ap-spd" type="number" value="${fmt(ap.speedSel,0)}" min="80" max="500"></label>
-      <label>VS: <input id="ap-vs" type="number" value="${fmt(ap.vsSel,0)}" min="-8000" max="8000"></label>
-    </div>
-    <div>
-      <button id="ap-onoff">${ap.enabled ? "DISENGAGE AP" : "ENGAGE AP"}</button>
-      <label><input type="checkbox" id="ap-lnav" ${ap.lnav ? "checked" : ""} ${fms.flightPlan.length > 1 ? "" : "disabled"}> LNAV</label>
-      <label><input type="checkbox" id="ap-vnav" ${ap.vnav ? "checked" : ""} ${fms.initA.cruiseLevel ? "" : "disabled"}> VNAV</label>
-      <span>Mode: <strong>${ap.mode}</strong></span>
-    </div>
-  `;
-}
-
-function renderPFD(el, flt, ap) {
-  // Simple canvas PFD with attitude indicator (artificial horizon)
-  el.innerHTML = `<canvas id="pfd-canvas" width="350" height="350"></canvas>
-    <div>
-      <span>IAS: <strong>${fmt(flt.ias,0)}</strong> kts</span>
-      <span>ALT: <strong>${fmt(flt.altitude,0)}</strong> ft</span>
-      <span>VS: <strong>${fmt(flt.vs,0)}</strong> fpm</span>
-      <span>HDG: <strong>${fmt(flt.hdg,0)}</strong>°</span>
-      <span>AP: <strong>${ap.enabled ? "ON" : "OFF"}</strong></span>
-    </div>
-  `;
-  const c = el.querySelector("#pfd-canvas");
-  if (c && c.getContext) drawPfdCanvas(c, flt);
-}
-
-function drawPfdCanvas(canvas, flt) {
-  const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // Artificial horizon
-  const cx = 175, cy = 175;
-  const radius = 100;
-  // Draw sky
-  ctx.save();
-  ctx.translate(cx, cy + flt.pitch * -1.5); // negative pitch is up in screen coords
-  ctx.rotate(-flt.bank * Math.PI / 180);
-  ctx.beginPath();
-  ctx.arc(0, 0, radius, 0, 2 * Math.PI);
-  ctx.closePath();
-  ctx.fillStyle = "#8ecae6";
-  ctx.fill();
-  // Draw ground
-  ctx.beginPath();
-  ctx.arc(0, 0, radius, Math.PI, 2 * Math.PI);
-  ctx.closePath();
-  ctx.fillStyle = "#b08968";
-  ctx.fill();
-  // Draw horizon line
-  ctx.strokeStyle = "#ddd";
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(-radius, 0);
-  ctx.lineTo(radius, 0);
-  ctx.stroke();
-  ctx.restore();
-
-  // Draw bank marks
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.strokeStyle = "#fff";
-  ctx.lineWidth = 2;
-  for(let i = -60; i <= 60; i += 30) {
-    ctx.rotate(i * Math.PI / 180);
-    ctx.beginPath();
-    ctx.moveTo(0, -radius);
-    ctx.lineTo(0, -radius + 15);
-    ctx.stroke();
-    ctx.rotate(-i * Math.PI / 180);
+  // LVar / Persistent State Storage Helpers
+  function saveState() {
+    try {
+      localStorage.setItem('ifrs_ui_state', JSON.stringify(state));
+    } catch (e) {}
   }
-  ctx.restore();
-}
+  function loadState() {
+    try {
+      const s = localStorage.getItem('ifrs_ui_state');
+      if (s) Object.assign(state, JSON.parse(s));
+    } catch (e) {}
+  }
 
-/* -- ND DIRECTIONAL MAP (CANVAS) -- */
+  // ---------------------------
+  // Helper Functions
+  // ---------------------------
 
-function renderND(el, flt, fms, ap) {
-  el.innerHTML = `<canvas id="nd-canvas" width="350" height="350"></canvas>
-    <div><span>TRK: <strong>${fmt(flt.hdg,0)}°</strong></span> | GS: ${fmt(flt.gs,0)} kts</div>
+  function isColdAndDark() {
+    return !state.batteryOn && !state.eng1Running && !state.eng2Running && !state.apuOn;
+  }
+  function isReadyForStart() {
+    return state.batteryOn && (state.extPwrOn || state.apuGenOn);
+  }
+  function isAvionicsPowered() {
+    return (state.batteryOn && (state.extPwrOn || state.apuGenOn)) && state.irsAligned;
+  }
+  function getActiveFPLWaypoint() {
+    if (!state.mcdu.FPLAN.length) return null;
+    return state.mcdu.FPLAN[state.routeIndex] || null;
+  }
+  function nextWaypoint() {
+    if (state.routeIndex + 1 < state.mcdu.FPLAN.length) state.routeIndex++;
+  }
+  function prevWaypoint() {
+    if (state.routeIndex > 0) state.routeIndex--;
+  }
+
+  // Degrees to radians
+  const deg2rad = deg => deg * Math.PI / 180;
+  // Bearing between two coords
+  function bearingTo(from, to) {
+    const φ1 = deg2rad(from.lat), φ2 = deg2rad(to.lat);
+    const λ1 = deg2rad(from.lon), λ2 = deg2rad(to.lon);
+    const y = Math.sin(λ2-λ1)*Math.cos(φ2);
+    const x = Math.cos(φ1)*Math.sin(φ2) -
+      Math.sin(φ1)*Math.cos(φ2)*Math.cos(λ2-λ1);
+    let θ = Math.atan2(y,x);
+    θ = (θ * 180 / Math.PI + 360) % 360;
+    return θ;
+  }
+  function haversine(from, to) {
+    // Returns distance in NM
+    const R = 3440.065; // NM
+    const dLat = deg2rad(to.lat-from.lat);
+    const dLon = deg2rad(to.lon-from.lon);
+    const a = Math.sin(dLat/2)*Math.sin(dLat/2) +
+      Math.cos(deg2rad(from.lat))*Math.cos(deg2rad(to.lat))*Math.sin(dLon/2)*Math.sin(dLon/2);
+    return 2*R*Math.asin(Math.sqrt(a));
+  }
+
+  // Fuel burn logic
+  function updateFuelBurn(dt) {
+    let burn = 0;
+    if (state.eng1Running) burn += state.fuelBurnRate * dt;
+    if (state.eng2Running) burn += state.fuelBurnRate * dt;
+    // Simple: 50/50 tanks
+    state.fuelTankL = Math.max(0, state.fuelTankL - burn/2);
+    state.fuelTankR = Math.max(0, state.fuelTankR - burn/2);
+  }
+
+  // ATC Voice Stub
+  function atcSay(line) {
+    state.atcLog.push({ time: Date.now(), line });
+    // (Voice playback can be integrated here; currently a stub for UI display)
+  }
+
+  // Simple random wind for PERF
+  function randomWind() {
+    const dir = Math.floor(Math.random()*360);
+    const spd = Math.floor(Math.random()*60);
+    return `${dir}/${spd}`;
+  }
+
+  // ---------------------------
+  // Panel UI: DOM Construction
+  // ---------------------------
+
+  // Main container creation, once
+  const mainContainer = document.createElement('div');
+  mainContainer.id = 'ifrs-cockpit-main';
+  mainContainer.style = `display:flex;flex-direction:row;background:#161b20;color:#f3f3f3;font:15px/1.3 "Segoe UI",Arial,sans-serif;height:100vh`;
+
+  // Panels: Overhead, Engine, Autopilot, PFD, ND, Map, MCDU (tabbed layout)
+  mainContainer.innerHTML = `
+    <div id="ifrs-sidepanels" style="width:360px;min-width:300px;max-width:450px;background:#10151a;display:flex;flex-direction:column">
+      <div style="flex:1 1 0;display:flex;flex-direction:column;">
+        <div id="overhead-panel"></div>
+        <div id="engine-panel"></div>
+        <div id="autopilot-panel"></div>
+      </div>
+      <div style="height:50px;display:flex;flex-direction:row;border-top:1px solid #333">
+        <button id="pfd-tab">PFD</button>
+        <button id="nd-tab">ND</button>
+        <button id="map-tab">Map</button>
+        <button id="mcdu-tab">MCDU</button>
+      </div>
+    </div>
+    <div id="ifrs-centerpanels" style="flex:1 1 0;background:#03040a;display:flex;flex-direction:column;overflow:hidden;">
+      <div id="pfd-panel" style="display:flex;flex:1 1 0;"></div>
+      <div id="nd-panel" style="display:none;flex:1 1 0;"></div>
+      <div id="map-panel" style="display:none;flex:1 1 0;"></div>
+      <div id="mcdu-panel" style="display:none;flex:1 1 0;"></div>
+    </div>
   `;
-  const c = el.querySelector("#nd-canvas");
-  if (c && c.getContext) drawNdCanvas(c, flt, fms, ap);
-}
+  document.body.appendChild(mainContainer);
 
-function drawNdCanvas(canvas, flt, fms, ap) {
-  const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const cx = 175, cy = 175, radius = 130;
-  // Draw compass rose
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(-flt.hdg * Math.PI / 180);
-  ctx.strokeStyle = "#aaa";
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.arc(0, 0, radius, 0, 2 * Math.PI);
-  ctx.stroke();
-  // Draw heading bug
-  ctx.save();
-  ctx.rotate((ap.heading - flt.hdg) * Math.PI / 180);
-  ctx.strokeStyle = "yellow";
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(0, -radius);
-  ctx.lineTo(0, -radius + 25);
-  ctx.stroke();
-  ctx.restore();
-  ctx.restore();
+  // Focus switchers for tabbed panels
+  document.getElementById('pfd-tab').onclick = ()=>switchPanel('PFD');
+  document.getElementById('nd-tab').onclick = ()=>switchPanel('ND');
+  document.getElementById('map-tab').onclick = ()=>switchPanel('MAP');
+  document.getElementById('mcdu-tab').onclick = ()=>switchPanel('MCDU');
+  function switchPanel(name) {
+    state.selectedPanel = name;
+    document.getElementById('pfd-panel').style.display = name==='PFD' ? 'flex':'none';
+    document.getElementById('nd-panel').style.display = name==='ND' ? 'flex':'none';
+    document.getElementById('map-panel').style.display = name==='MAP' ? 'flex':'none';
+    document.getElementById('mcdu-panel').style.display = name==='MCDU' ? 'flex':'none';
+  }
 
-  // Plot flight plan waypoints (simple straight lines)
-  if (fms.flightPlan && fms.flightPlan.length > 1) {
+  // Attach Canvas and Map placeholders once
+  const pfdCanvas = document.createElement('canvas');
+  pfdCanvas.id = 'pfd-canvas'; pfdCanvas.width = 500; pfdCanvas.height = 500;
+  pfdCanvas.style = 'background:#212a38;margin:8px;border-radius:12px;box-shadow:0 0 20px #0896ff3a;';
+  document.getElementById('pfd-panel').appendChild(pfdCanvas);
+
+  const ndCanvas = document.createElement('canvas');
+  ndCanvas.id = 'nd-canvas'; ndCanvas.width = 500; ndCanvas.height = 500;
+  ndCanvas.style = 'background:#19252d;margin:8px;border-radius:12px;box-shadow:0 0 16px #ccabff38;';
+  document.getElementById('nd-panel').appendChild(ndCanvas);
+
+  const mapDiv = document.createElement('div');
+  mapDiv.id = 'leaflet-map'; mapDiv.style = 'width:98%;height:480px;border-radius:16px;margin:10px auto;';
+  document.getElementById('map-panel').appendChild(mapDiv);
+
+  // ---------------------------
+  // Panel Render Functions
+  // ---------------------------
+
+  function renderOverheadPanel() {
+    document.getElementById('overhead-panel').innerHTML = `
+      <div style="margin:12px;">
+        <h3 style="color:#b4cffa">Overhead Panel</h3>
+        <button id="batteryBtn" style="background:${state.batteryOn ? '#19e0af':'#222'};color:#000;font-weight:bold;">Battery ${state.batteryOn?'ON':'OFF'}</button>
+        <button id="extPwrBtn" style="background:${state.extPwrOn ? '#e0e632':'#333'}">EXT PWR</button>
+        <button id="apuBtn" style="background:${state.apuOn?'#98f':'#454545'}">APU ${state.apuOn?(state.apuAvail?'(Avail)':'(Starting)'):'OFF'}</button>
+        <button id="apuGenBtn" style="background:${state.apuGenOn?'#01bffd':'#333'}">APU GEN</button>
+        <button id="irsBtn" style="background:${state.irsAligned?'#6f3':'#181'}">IRS: ${state.irsAligned?'Aligned':'OFF'}</button>
+        <button id="emerBtn" style="background:${state.emerLights?'#fdfc07':'#333'}">EMER LT</button>
+      </div>
+    `;
+    // Wire events
+    document.getElementById('batteryBtn').onclick = ()=>{ state.batteryOn=!state.batteryOn;saveState();};
+    document.getElementById('extPwrBtn').onclick = ()=>{ state.extPwrOn=!state.extPwrOn;saveState();};
+    document.getElementById('apuBtn').onclick = ()=>{ 
+      if (!state.apuOn) { state.apuOn=true; state.apuAvail=false; setTimeout(()=>{ state.apuAvail=true; }, 3000);}
+      else { state.apuOn=false; state.apuAvail=false; state.apuGenOn=false;}
+      saveState();
+    };
+    document.getElementById('apuGenBtn').onclick = ()=>{ 
+      if (state.apuOn && state.apuAvail) state.apuGenOn=!state.apuGenOn;
+      saveState();
+    };
+    document.getElementById('irsBtn').onclick = ()=>{
+      if (!state.irsAligned && isReadyForStart()) {
+        state.irsAligning = true;
+        setTimeout(()=>{ 
+          state.irsAligning=false; 
+          state.irsAligned=true; 
+          state.atcLog.push({time: Date.now(),line:'IRS aligned'});
+          saveState();
+        }, 3000);
+      } else if (state.irsAligned) {
+        state.irsAligned=false; state.irsAligning=false; saveState();
+      }
+    };
+    document.getElementById('emerBtn').onclick = ()=>{ state.emerLights=!state.emerLights;saveState();};
+  }
+
+  function renderEnginePanel() {
+    document.getElementById('engine-panel').innerHTML = `
+      <div style="margin:12px;">
+        <h3 style="color:#ddc">Engine Panel</h3>
+        <button id="eng1Btn" style="background:${state.eng1Start?'#fbb':'#333'}">ENG 1 START</button>
+        <button id="eng2Btn" style="background:${state.eng2Start?'#fbb':'#333'}">ENG 2 START</button>
+        <span style="margin-left:16px;">L:${state.fuelTankL.toFixed(0)}kg | R:${state.fuelTankR.toFixed(0)}kg</span>
+        <div style="color:#baf;">Status: 
+          <span>ENG1: ${state.eng1Running?'RUN':'OFF'}</span>,
+          <span>ENG2: ${state.eng2Running?'RUN':'OFF'}</span>
+        </div>
+      </div>
+    `;
+    document.getElementById('eng1Btn').onclick = ()=>{
+      if (state.eng1Running) state.eng1Running=false;
+      else if (isAvionicsPowered()) { state.eng1Start=true; setTimeout(()=>{ state.eng1Running=true; state.eng1Start=false;}, 2500);}
+      saveState();
+    };
+    document.getElementById('eng2Btn').onclick = ()=>{
+      if (state.eng2Running) state.eng2Running=false;
+      else if (isAvionicsPowered()) { state.eng2Start=true; setTimeout(()=>{ state.eng2Running=true; state.eng2Start=false;}, 2600);}
+      saveState();
+    };
+  }
+
+  function renderAutopilotPanel() {
+    document.getElementById('autopilot-panel').innerHTML = `
+      <div style="margin:12px;">
+        <h3 style="color:#fade88;">Autopilot Panel</h3>
+        <label>AP: <input id="apOnChk" type="checkbox" ${state.apOn?'checked':''}/></label>
+        <label>HDG: <input id="apHdg" type="number" value="${state.apTarget.hdg}" min="0" max="359" style="width:60px;"></label>
+        <label>ALT: <input id="apAlt" type="number" value="${state.apTarget.alt}" min="100" max="40000" style="width:80px;"></label>
+        <label>SPD: <input id="apSpd" type="number" value="${state.apTarget.spd}" min="80" max="500" style="width:64px;"></label>
+        <button id="apModeBtn" style="background:#282">Mode: ${state.apMode}</button>
+      </div>
+      <div style="margin-left:12px;">
+        <button id="lnavBtn" style="background:${state.lnavActive ? '#adf':'#222'};">LNAV</button>
+        <button id="vnavBtn" style="background:${state.vnavActive ? '#fea':'#222'};">VNAV</button>
+      </div>
+    `;
+    document.getElementById('apOnChk').onchange = e => { state.apOn = !!e.target.checked; saveState();};
+    document.getElementById('apHdg').onchange = e => { state.apTarget.hdg=parseInt(e.target.value)||0; saveState();};
+    document.getElementById('apAlt').onchange = e => { state.apTarget.alt=parseInt(e.target.value)||0; saveState();};
+    document.getElementById('apSpd').onchange = e => { state.apTarget.spd=parseInt(e.target.value)||0; saveState();};
+    document.getElementById('apModeBtn').onclick = ()=>{
+      // Cycle through HDG/SPD/ALT/LNAV/VNAV/OFF
+      const modes = ['OFF','HDG','SPD','ALT','LNAV','VNAV'];
+      let idx = modes.indexOf(state.apMode);
+      state.apMode = modes[(idx+1)%modes.length];
+      saveState();
+    };
+    document.getElementById('lnavBtn').onclick = ()=>{ state.lnavActive=!state.lnavActive; saveState();};
+    document.getElementById('vnavBtn').onclick = ()=>{ state.vnavActive=!state.vnavActive; saveState();};
+  }
+
+  // --- PFD Artificial Horizon Panel (Canvas) ---
+  function drawPFD() {
+    const ctx = pfdCanvas.getContext('2d');
+    ctx.clearRect(0,0,pfdCanvas.width,pfdCanvas.height);
+
+    // Artificial horizon
+    const cx = 250, cy = 250, r = 170;
+    const pitch = state.attitude.pitch, roll = state.attitude.roll;
     ctx.save();
-    ctx.translate(cx, cy);
-    ctx.strokeStyle = "#8ecae6";
+    ctx.translate(cx,cy);
+    ctx.rotate(-roll*Math.PI/180);
+
+    // Horizon sky/ground
+    let pitchPx = pitch * 2.1;
+    ctx.fillStyle = '#3193ff';
+    ctx.beginPath();
+    ctx.arc(0,pitchPx, r, Math.PI, 2*Math.PI);
+    ctx.fill();
+    ctx.fillStyle = '#e9bd79';
+    ctx.beginPath();
+    ctx.arc(0,pitchPx, r, 0, Math.PI);
+    ctx.fill();
+
+    // Horizon line
+    ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(0, 0);
-    let prevWp = { lat: flt.lat, lon: flt.lon };
-    for (let i = 0; i < 2 && fms.position + i < fms.flightPlan.length; ++i) {
-      const wp = fms.flightPlan[fms.position + i];
-      const hdgToWp = getHeadingBetween(prevWp, wp);
-      const distNm = getDistanceNM(prevWp, wp);
-      const angle = (hdgToWp - flt.hdg) * Math.PI / 180;
-      const r = clamp(distNm * 10, 10, radius);
-      ctx.lineTo(Math.sin(angle) * r, -Math.cos(angle) * r);
-      prevWp = wp;
-    }
+    ctx.moveTo(-r, pitchPx); ctx.lineTo(r,pitchPx);
     ctx.stroke();
+
+    ctx.restore();
+
+    // Center cross/aircraft symbol
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(-20,0);ctx.lineTo(20,0);ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,-10);ctx.lineTo(0,10);ctx.stroke();
+    ctx.restore();
+
+    // Speed/Alt tapes
+    ctx.font='bold 20px Segoe UI';
+    ctx.fillStyle='#ace';
+    ctx.fillText('SPD', 10,180);
+    ctx.font='bold 32px Segoe UI';
+    ctx.fillText(state.airspeed.toFixed(0), 16,220);
+
+    ctx.font='bold 20px Segoe UI';
+    ctx.fillText('ALT', 426,180);
+    ctx.font='bold 32px Segoe UI';
+    ctx.fillText(state.altitude.toFixed(0), 415,220);
+
+    // Heading box
+    ctx.strokeStyle='#8d5'; ctx.lineWidth = 6;
+    ctx.strokeRect(188,10,130,40);
+    ctx.fillStyle='#ebe';
+    ctx.font = 'bold 30px monospace';
+    ctx.fillText('HDG',205,38);
+    ctx.fillStyle="#fff"; ctx.font = 'bold 36px monospace';
+    ctx.fillText(`${state.heading.toFixed(0)}`,270,38);
+
+    // VSI - vertical speed indicator
+    ctx.save(); ctx.translate(470,340);
+    ctx.rotate(-Math.PI/2);
+    ctx.fillStyle='#fad';
+    ctx.font='bolder 22px Segoe UI';
+    ctx.fillText(`V/S: ${state.vspeed.toFixed(0)}`,0,0);
     ctx.restore();
   }
-}
 
-function getHeadingBetween(from, to) {
-  if (!(from && to)) return 0;
-  const dLon = (to.lon - from.lon) * Math.PI / 180;
-  const fromLat = from.lat * Math.PI / 180;
-  const toLat = to.lat * Math.PI / 180;
-  const y = Math.sin(dLon) * Math.cos(toLat);
-  const x = Math.cos(fromLat) * Math.sin(toLat) -
-            Math.sin(fromLat) * Math.cos(toLat) * Math.cos(dLon);
-  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-}
+  // --- ND: Navigation Display Canvas ---
+  function drawND() {
+    const ctx = ndCanvas.getContext('2d');
+    ctx.clearRect(0,0,ndCanvas.width,ndCanvas.height);
 
-function getDistanceNM(a, b) {
-  if (!(a && b)) return 0;
-  const lat1 = a.lat * Math.PI / 180;
-  const lat2 = b.lat * Math.PI / 180;
-  const dLat = lat2 - lat1;
-  const dLon = (b.lon - a.lon) * Math.PI / 180;
-  const R = 3440.07; // nm
-  const s =
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1) * Math.cos(lat2) *
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
-}
+    // Outer compass circle
+    const cx=250,cy=250,r=200;
+    ctx.save();
+    ctx.strokeStyle='#88d';
+    ctx.lineWidth=4;
+    ctx.beginPath();ctx.arc(cx,cy,r,0,2*Math.PI);ctx.stroke();
 
-/* -- LEAFLET IFRS MAP -- */
+    // Compass rose
+    for(let i=0;i<36;i++) {
+      const ang = (i*10 - state.heading)*Math.PI/180;
+      let x = cx + Math.sin(ang)*r, y = cy - Math.cos(ang)*r;
+      ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(x,y);ctx.strokeStyle='#444';ctx.stroke();
+      if (i%3===0) {
+        ctx.save();
+        ctx.translate(cx+Math.sin(ang)*r, cy-Math.cos(ang)*r);
+        ctx.rotate(ang);
+        ctx.fillStyle='#aaa'; ctx.font='14px monospace';
+        let hdgLabel = (i*10)%360;
+        ctx.fillText(String(hdgLabel).padStart(3,'0'),-16,0);
+        ctx.restore();
+      }
+    }
 
-// Map object scoped to state
-let leafletMap = null;
+    // Active WP, route, and aircraft
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.rotate(0);
+    ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.arc(0,0,12,0,2*Math.PI); ctx.fill();
+    ctx.fillStyle='#98f'; ctx.font='bold 14px monospace';
+    ctx.fillText('A/C',-16,4);
+    ctx.restore();
 
-function renderLeafletMap(el, flt, fms) {
-  // Use Leaflet only if library loaded (`L`)
-  if (!window.L) {
-    el.innerHTML = `<div style="color:red">Leaflet.js library not found. IFRS Map unavailable.</div>`;
-    return;
+    // Draw route
+    if (state.mcdu.FPLAN.length > 0) {
+      let prev = state.position;
+      ctx.strokeStyle='#1fd'; ctx.lineWidth=4; ctx.beginPath();
+      ctx.moveTo(cx,cy);
+      for (let w=state.routeIndex;w<state.mcdu.FPLAN.length;w++) {
+        const wp = state.mcdu.FPLAN[w];
+        let brg = bearingTo(prev, wp);
+        let dist = Math.min(haversine(prev, wp), 40); // clamp for ND
+        let x = cx+Math.sin(deg2rad(brg-state.heading))*dist*4;
+        let y = cy-Math.cos(deg2rad(brg-state.heading))*dist*4;
+        ctx.lineTo(x,y);
+        prev = wp;
+      }
+      ctx.stroke();
+      // Waypoint marker
+      for (let w=state.routeIndex;w<Math.min(state.mcdu.FPLAN.length,state.routeIndex+5);w++) {
+        const wp=state.mcdu.FPLAN[w];
+        let brg = bearingTo(state.position, wp);
+        let dist = Math.min(haversine(state.position, wp), 40);
+        let x = cx+Math.sin(deg2rad(brg-state.heading))*dist*4;
+        let y = cy-Math.cos(deg2rad(brg-state.heading))*dist*4;
+        ctx.fillStyle='#fea'; ctx.beginPath(); ctx.arc(x,y,10,0,2*Math.PI);ctx.fill();
+        ctx.fillStyle='#3132ff'; ctx.font='13px monospace';
+        ctx.fillText(wp.fix,x-13,y-14);
+      }
+    }
   }
-  el.innerHTML = `<div id="leaflet-map" style="width:350px;height:350px;background:#222"></div>`;
-  if (!leafletMap) {
-    leafletMap = L.map("leaflet-map").setView([flt.lat, flt.lon], 10);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 15,
-      attribution: ""
-    }).addTo(leafletMap);
-    leafletMap.flyTo([flt.lat, flt.lon], 10);
-    L.marker([flt.lat, flt.lon], {title: "You"}).addTo(leafletMap);
-  } else {
-    leafletMap.setView([flt.lat, flt.lon]);
-    // update marker...
+
+  // --- Leaflet Map Panel ---
+  let map, aircraftMarker, routeLine;
+  function initLeaflet() {
+    if (window.L && !map) {
+      map = L.map('leaflet-map').setView([state.position.lat, state.position.lon], 7);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+      aircraftMarker = L.marker([state.position.lat,state.position.lon]).addTo(map)
+        .bindPopup('Your Aircraft').openPopup();
+      updateRouteOnMap();
+    }
   }
-}
+  function updateLeaflet() {
+    if (map && aircraftMarker) {
+      aircraftMarker.setLatLng([state.position.lat,state.position.lon]);
+      map.setView([state.position.lat,state.position.lon], map.getZoom(), {animate:true});
+      updateRouteOnMap();
+    }
+  }
+  function updateRouteOnMap() {
+    // Remove old polyline
+    if (routeLine) { try { map.removeLayer(routeLine); } catch(e){} }
+    if (state.mcdu.FPLAN.length > 1) {
+      const latlons = [[state.position.lat,state.position.lon], ...state.mcdu.FPLAN.map(wp=>[wp.lat,wp.lon])];
+      routeLine = L.polyline(latlons, {color:'#1fd',weight:4}).addTo(map);
+    }
+  }
 
-/* ---- MCDU RENDERING AND LOGIC ---- */
-
-function renderMCDU(el, mcdu, fms) {
-  el.innerHTML = `
-    <div class="mcdu">
-      <h3>MCDU</h3>
-      <div class="mcdu-scr">${mcdu.scratchpad}</div>
-      <div class="mcdu-main">${renderMcduPage(mcdu, fms)}</div>
-      <div class="mcdu-keypad">
-        <div>
-          ${["A","B","C","D","E","F","G","H","I","J"].map(x =>
-            `<button class="key" data-key="${x}">${x}</button>`
-          ).join("")}
-        </div>
-        <div>
-          ${["K","L","M","N","O","P","Q","R","S","T"].map(x =>
-            `<button class="key" data-key="${x}">${x}</button>`
-          ).join("")}
-        </div>
-        <div>
-          ${["U","V","W","X","Y","Z","1","2","3","4"].map(x =>
-            `<button class="key" data-key="${x}">${x}</button>`
-          ).join("")}
-        </div>
-        <div>
-          ${["5","6","7","8","9","0","/",".","CLR","EXEC"].map(k =>
-            `<button class="key" data-key="${k}">${k}</button>`
-          ).join("")}
-        </div>
-        <div>
-          ${["LEFT", "RIGHT", "UP", "DOWN", "MENU", "INIT", "FPLN", "PERF"].map(k =>
-            `<button class="page" data-page="${k}">${k}</button>`
-          ).join("")}
-        </div>
+  // --- MCDU Panel ---
+  function renderMCDU() {
+    // Draw header + nav
+    let html = `<div style="font:15px monospace;background:#222;border-radius:20px 20px 2px 2px;box-shadow:0 4px 24px #ccf2;">
+      <div style="display:flex;gap:16px;">
+        <strong style="padding:8px 18px;border-bottom:3px solid #11b">${state.mcduPage}</strong>
+        <button id="mcdu-initA" style="background:#333;color:#a4c;">INIT A</button>
+        <button id="mcdu-fplan" style="background:#333;color:#86f;">F-PLAN</button>
+        <button id="mcdu-perf" style="background:#333;color:#f86;">PERF</button>
+        <span style="flex:1 1 0"></span>
       </div>
-    </div>
-  `;
-  // Add page switchers if needed
-}
-
-function renderMcduPage(mcdu, fms) {
-  switch(mcdu.page) {
-    case "INIT":
-    case "INITA":
-      return renderMcduInitA(fms.initA);
-    case "FPLN":
-      return renderMcduFPLN(fms.flightPlan, fms.position);
-    case "PERF":
-      return renderMcduPerf(fms.perfPages);
-    default:
-      return `
-        <div>
-          <button class="page" data-page="INIT">INIT A</button>
-          <button class="page" data-page="FPLN">F-PLAN</button>
-          <button class="page" data-page="PERF">PERF</button>
-        </div>
-      `;
+      <div id="mcdu-page-content" style="margin:20px 8px 8px 8px;"></div>
+    </div>`;
+    document.getElementById('mcdu-panel').innerHTML = html;
+    document.getElementById('mcdu-initA').onclick = ()=>{state.mcduPage='INIT';saveState();};
+    document.getElementById('mcdu-fplan').onclick = ()=>{state.mcduPage='FPLAN';saveState();};
+    document.getElementById('mcdu-perf').onclick = ()=>{state.mcduPage='PERF';saveState();};
+    // Page content render
+    if (state.mcduPage==='INIT') renderMCDU_INIT();
+    if (state.mcduPage==='FPLAN') renderMCDU_FPLAN();
+    if (state.mcduPage==='PERF') renderMCDU_PERF();
   }
-}
-
-function renderMcduInitA(initA) {
-  return `
-    <pre>
-${mcduLine("  INIT A                      ", 24)}
-${mcduLine(` FROM/TO   ${initA.from || "----"}/${initA.to || "----"}`, 24)}
-${mcduLine(` FLT NBR   ${initA.flightNumber || "----"}`, 24)}
-${mcduLine(` COST INDEX ${initA.costIndex || "---"}`, 24)}
-${mcduLine(` CRZ FL/TEMP ${initA.cruiseLevel || "---"}/${initA.cruiseTemp || "--"}`, 24)}
-${mcduLine(" IRS INIT>", 24)}
-    </pre>
-  `;
-}
-
-function renderMcduFPLN(fpln, pos) {
-  let lines = [
-    mcduLine("  F-PLAN               ACTIVE", 24),
-  ];
-  for(let i = Math.max(0, pos - 2); i < Math.min(fpln.length, pos+4); ++i) {
-    const wp = fpln[i];
-    lines.push(mcduLine(
-      `${i === pos ? "»" : " "} ${wp.ident}   ${fmt(wp.lat, 2)},${fmt(wp.lon, 2)} ${wp.alt ? `${wp.alt}ft` : ""}`,
-      24));
+  function renderMCDU_INIT() {
+    const d = state.mcdu.INIT;
+    document.getElementById('mcdu-page-content').innerHTML = `
+      <form id="initForm">
+        <label>Flight No: <input name="flightNo" value="${d.flightNo}" placeholder="EZY123"></label>
+        <label>From ICAO: <input name="from" value="${d.from}" placeholder="EGLL" maxlength="4"></label>
+        <label>To ICAO: <input name="to" value="${d.to}" placeholder="LFMN" maxlength="4"></label>
+        <label>Cost Index: <input name="costIdx" type="number" value="${d.costIdx}" min="0" max="999"></label>
+        <label>CRZ FL: <input name="crzFL" type="number" value="${d.crzFL}" min="50" max="450"></label>
+        <label>CRZ Temp: <input name="crzTemp" type="number" value="${d.crzTemp}" min="-80" max="50"></label>
+        <label>WIND: <input name="wind" value="${d.wind || randomWind()}" maxlength="8"></label>
+        <button type="submit">Save</button>
+      </form>
+    `;
+    document.getElementById('initForm').onsubmit = e=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      d.flightNo = fd.get('flightNo');
+      d.from = fd.get('from');
+      d.to = fd.get('to');
+      d.costIdx = parseInt(fd.get('costIdx'))||0;
+      d.crzFL= parseInt(fd.get('crzFL'))||350;
+      d.crzTemp= parseInt(fd.get('crzTemp'))||-56;
+      d.wind = fd.get('wind');
+      // Optionally: Load simBrief route if connected.
+      saveState();
+    };
   }
-  return `<pre>${lines.join("\n")}</pre>`;
-}
-
-/* Sample simple PERF rendering */
-function renderMcduPerf(perfPages) {
-  const p = perfPages.data[perfPages.current] || {};
-  return `
-    <pre>
-${mcduLine(` PERF - ${perfPages.current}  `, 24)}
-${mcduLine(` V1   ${p.V1 || "---"}`)}
-${mcduLine(` VR   ${p.VR || "---"}`)}
-${mcduLine(` V2   ${p.V2 || "---"}`)}
-${mcduLine(` THR RED ALT   ${p.thrRedAlt || "---"}`)}
-${mcduLine(` ACC ALT      ${p.accAlt || "---"}`)}
-    </pre>
-  `;
-}
-
-/* ---- ATC VOICE STUB ---- */
-
-function renderATCStub(el, atc) {
-  el.innerHTML = `
-    <h3>ATC (Stub)</h3>
-    <div>Last: <span id="atc-msg">${atc.lastMessage || "None"}</span></div>
-    <button id="atc-contact-btn">Send Contact</button>
-  `;
-}
-
-/* ---- COLD & DARK STARTUP LOGIC ---- */
-
-function coldAndDarkStart() {
-  setState(s => {
-    const ac = s.aircraft;
-    // Power OFF everything
-    ac.overhead.battery = false;
-    ac.overhead.externalPower = false;
-    ac.overhead.apuOn = false;
-    ac.overhead.apuAvailable = false;
-    ac.overhead.fuelPumps = false;
-    ac.overhead.hydraulics = false;
-    Object.keys(ac.overhead.lights).forEach(k => ac.overhead.lights[k] = false);
-    ac.overhead.airConditioning = false;
-    ac.engines.forEach(e => {
-      e.master = false;
-      e.running = false;
-      e.n1 = e.n2 = e.egt = e.fuelFlow = 0;
+  function renderMCDU_FPLAN() {
+    // List waypoints and allow editing, removal, or addition
+    let rows = state.mcdu.FPLAN.map((wp,i)=>`
+      <tr><td>${i+1}</td>
+          <td><input data-idx="${i}" class="mcdu-fix" value="${wp.fix}"></td>
+          <td><input data-idx="${i}" class="mcdu-lat" value="${wp.lat.toFixed(3)}"></td>
+          <td><input data-idx="${i}" class="mcdu-lon" value="${wp.lon.toFixed(3)}"></td>
+          <td><input data-idx="${i}" class="mcdu-alt" value="${wp.alt||''}"></td>
+          <td><input data-idx="${i}" class="mcdu-spd" value="${wp.spd||''}"></td>
+          <td><button data-idx="${i}" class="delwp">X</button></td></tr>
+    `).join('');
+    // New row template
+    const newRow = `<tr><td>+</td><td><input id="new-fix" size="7"></td>
+      <td><input id="new-lat" size="7"></td><td><input id="new-lon" size="7"></td>
+      <td><input id="new-alt" size="5"></td><td><input id="new-spd" size="5"></td>
+      <td><button id="addwp">Add</button></td></tr>`;
+    document.getElementById('mcdu-page-content').innerHTML =`
+      <table style="background:#191b25;width:99%;border-collapse:collapse;">
+        <thead><tr>
+        <th>#</th><th>FIX</th><th>LAT</th><th>LON</th><th>ALT</th><th>SPD</th><th></th></tr></thead>
+        <tbody>${rows}${newRow}</tbody>
+      </table>
+      <button id="savefplan">Save & Refresh</button>
+    `;
+    // Wire up WP editing & add/remove
+    document.querySelectorAll('.delwp').forEach(btn=>{
+      btn.onclick = ()=>{ 
+        state.mcdu.FPLAN.splice(parseInt(btn.dataset.idx),1); 
+        saveState();
+      };
     });
-    ac.autopilot.enabled = false;
-    ac.coldAndDark = true;
-    ac.powered = false;
-    ac.isInitialized = false;
-  });
-}
-
-function startupPowerFlow() {
-  // Simulate full startup sequence (battery → ext pwr → APU → fuel pumps)
-  setState(s => {
-    const oh = s.aircraft.overhead;
-    oh.battery = true;
-    setTimeout(() => {
-      setState(s2 => { s2.aircraft.overhead.externalPower = true; s2.aircraft.powered = true; notify(); });
-      setTimeout(() => {
-        setState(s3 => { s3.aircraft.overhead.apuOn = true; s3.aircraft.overhead.apuAvailable = true; notify(); });
-        setTimeout(() => {
-          setState(s4 => { s4.aircraft.overhead.fuelPumps = true; notify(); });
-          setTimeout(() => {
-            setState(s5 => {
-              s5.aircraft.isInitialized = true;
-              s5.aircraft.coldAndDark = false;
-              notify();
-            });
-          }, 500);
-        }, 700);
-      }, 1000);
-    }, 800);
-  });
-}
-
-/* ---- AUTOPILOT WITH LNAV/VNAV ---- */
-
-function autopilotLogic(acft, dtSec) {
-  if (!acft.autopilot.enabled) return;
-  const ap = acft.autopilot;
-  const flt = acft.flight;
-  // Autopilot Heading
-  if (ap.lnav && acft.fms.flightPlan.length >= 2) {
-    // Active LNAV: Track to next waypoint
-    const pos = acft.fms.position;
-    const wp = acft.fms.flightPlan[pos+1];
-    if (!wp) return;
-    const hdgToWp = getHeadingBetween({ lat: flt.lat, lon: flt.lon }, wp);
-    const diff = ((hdgToWp - flt.hdg + 540)%360)-180;
-    flt.hdg = clamp(flt.hdg + diff*0.05, 0, 359); // Simple PID
-    // If close to WP, increment
-    if (getDistanceNM({lat: flt.lat, lon: flt.lon}, wp) < 2) acft.fms.position++;
-  }
-  if (ap.vnav && acft.fms.flightPlan.length > acft.fms.position+1) {
-    // Climb/Descend to next waypoint altitude
-    const wp = acft.fms.flightPlan[acft.fms.position+1];
-    if (wp && wp.alt) {
-      const err = wp.alt - flt.altitude;
-      let vs;
-      if (Math.abs(err) < 30) vs = 0;
-      else vs = clamp(err/10, -1800, 2200);
-      flt.vs = vs;
-      flt.altitude += vs * dtSec / 60; // Convert fpm to feet per dt
-    }
-  } else {
-    // HDG/ALT/VS/SPD holds
-    flt.hdg = clamp(ap.heading, 0, 359);
-    if (flt.altitude !== ap.altSel) {
-      const diff = ap.altSel - flt.altitude;
-      const vs = clamp(diff/10, -1800, 2200);
-      flt.altitude += vs * dtSec / 60;
-      flt.vs = vs;
-    } else {
-      flt.vs = 0;
-    }
-  }
-  // Airspeed hold
-  if (ap.speedSel && ap.speedSel > 79) {
-    flt.ias += clamp(ap.speedSel - flt.ias, -3, 3);
-  }
-}
-
-/* ---- FUEL BURN UPDATER ---- */
-
-function updateFuel(acft, dtSec) {
-  let totalBurn = 0;
-  acft.engines.forEach((e, idx) => {
-    // Update EGT, N1/N2 simulation, and fuel
-    if (e.master && acft.overhead.fuelPumps) {
-      e.n1 = clamp(e.n1 + (100-e.n1)*0.1, 0, 100);
-      e.n2 = clamp(e.n2 + (90-e.n2)*0.08, 0, 90);
-      e.egt = clamp(e.egt + 350*0.05, 0, 650);
-      e.running = true;
-    } else {
-      e.n1 = clamp(e.n1 - 2, 0, 100);
-      e.n2 = clamp(e.n2 - 1, 0, 90);
-      e.egt = clamp(e.egt - 40, 0, 650);
-      e.running = false;
-    }
-    e.fuelFlow = computeFuelBurn(e);
-    totalBurn += e.fuelFlow;
-  });
-  const fuelUsed = totalBurn * (dtSec / 3600);
-  acft.fuel.quantity = Math.max(acft.fuel.quantity - fuelUsed, 0);
-  acft.fuel.burnRate = totalBurn;
-}
-
-/* ---- MAIN RENDER FUNCTION ---- */
-// Gather UI elements at startup for efficiency
-const ui = {};
-function setupUIRefs() {
-  ui.oh = document.getElementById("overhead");
-  ui.eng = document.getElementById("engine");
-  ui.ap = document.getElementById("autopilot");
-  ui.pfd = document.getElementById("pfd");
-  ui.nd = document.getElementById("nd");
-  ui.map = document.getElementById("leaflet");
-  ui.mcdu = document.getElementById("mcdu");
-  ui.atc = document.getElementById("atc");
-  ui.coldDarkBtn = document.getElementById("cold-dark");
-  ui.startupBtn = document.getElementById("startup-seq");
-}
-
-/* ---- MAIN SUBSCRIBER ---- */
-
-subscribe(st => {
-  const ac = st.aircraft;
-  if (ui.oh) renderOverheadPanel(ui.oh, ac.overhead);
-  if (ui.eng) renderEnginePanel(ui.eng, ac.overhead, ac.engines, ac.fuel);
-  if (ui.ap) renderAutopilotPanel(ui.ap, ac.autopilot, ac.fms);
-  if (ui.pfd) renderPFD(ui.pfd, ac.flight, ac.autopilot);
-  if (ui.nd) renderND(ui.nd, ac.flight, ac.fms, ac.autopilot);
-  if (ui.map) renderLeafletMap(ui.map, ac.flight, ac.fms);
-  if (ui.mcdu) renderMCDU(ui.mcdu, ac.mcdu, ac.fms);
-  if (ui.atc) renderATCStub(ui.atc, ac.atc);
-});
-
-/* ---- EVENT HANDLING SECTION ---- */
-
-document.addEventListener("DOMContentLoaded", function() {
-  setupUIRefs();
-
-  // Cold & Dark / Startup
-  if (ui.coldDarkBtn) ui.coldDarkBtn.onclick = () => coldAndDarkStart();
-  if (ui.startupBtn) ui.startupBtn.onclick = () => startupPowerFlow();
-
-  // Overhead Panel
-  ui.oh.addEventListener("click", function(ev) {
-    if (ev.target.id === "battery-btn") {
-      setState(s => s.aircraft.overhead.battery = !s.aircraft.overhead.battery);
-    } else if (ev.target.id === "extpower-btn") {
-      setState(s => s.aircraft.overhead.externalPower = !s.aircraft.overhead.externalPower);
-    } else if (ev.target.id === "apu-btn") {
-      setState(s => s.aircraft.overhead.apuOn = !s.aircraft.overhead.apuOn);
-      setTimeout(() =>
-        setState(s => s.aircraft.overhead.apuAvailable = s.aircraft.overhead.apuOn), 800);
-    }
-  });
-  ui.oh.addEventListener("change", function(ev) {
-    if (ev.target.id === "fuelPumps-btn") {
-      setState(s => s.aircraft.overhead.fuelPumps = ev.target.checked);
-    } else if (ev.target.id === "hydraulics-btn") {
-      setState(s => s.aircraft.overhead.hydraulics = ev.target.checked);
-    } else if (ev.target.className === "light-btn") {
-      const k = ev.target.dataset.light;
-      setState(s => s.aircraft.overhead.lights[k] = ev.target.checked);
-    } else if (ev.target.id === "ac-btn") {
-      setState(s => s.aircraft.overhead.airConditioning = ev.target.checked);
-    }
-  });
-
-  // Engine Panel
-  ui.eng.addEventListener("click", function(ev) {
-    if (ev.target.id && ev.target.id.startsWith("eng-master-")) {
-      const idx = parseInt(ev.target.id.slice(-1));
-      setState(s => s.aircraft.engines[idx].master = !s.aircraft.engines[idx].master);
-    }
-  });
-
-  // Autopilot Panel
-  ui.ap.addEventListener("click", function(ev) {
-    if (ev.target.id === "ap-onoff") {
-      setState(s => s.aircraft.autopilot.enabled = !s.aircraft.autopilot.enabled);
-    }
-  });
-  ui.ap.addEventListener("change", function(ev) {
-    if (ev.target.id === "ap-lnav") {
-      setState(s => s.aircraft.autopilot.lnav = ev.target.checked);
-      setState(s => s.aircraft.autopilot.mode = ev.target.checked ? "LNAV" : "HDG");
-    }
-    if (ev.target.id === "ap-vnav") {
-      setState(s => s.aircraft.autopilot.vnav = ev.target.checked);
-      setState(s => s.aircraft.autopilot.mode = ev.target.checked ? "VNAV" : s.aircraft.autopilot.mode);
-    }
-    if (ev.target.id === "ap-hdg") {
-      setState(s => s.aircraft.autopilot.heading = clamp(Number(ev.target.value) || 0, 0, 359));
-    }
-    if (ev.target.id === "ap-alt") {
-      setState(s => s.aircraft.autopilot.altSel = clamp(Number(ev.target.value)||0, 0, 45000));
-    }
-    if (ev.target.id === "ap-spd") {
-      setState(s => s.aircraft.autopilot.speedSel = clamp(Number(ev.target.value)||180, 80, 500));
-    }
-    if (ev.target.id === "ap-vs") {
-      setState(s => s.aircraft.autopilot.vsSel = clamp(Number(ev.target.value)||0, -8000, 8000));
-    }
-  });
-
-  // MCDU Panel
-  ui.mcdu.addEventListener("click", function(ev) {
-    if (ev.target.classList.contains("key")) {
-      // Scratchpad entry logic
-      const k = ev.target.dataset.key;
-      setState(s => {
-        let sp = s.aircraft.mcdu.scratchpad || "";
-        if (k === "CLR") sp = ""; else if (k === "EXEC") {}; else sp += k;
-        s.aircraft.mcdu.scratchpad = sp;
+    document.getElementById('addwp').onclick = ()=>{
+      const fix = document.getElementById('new-fix').value;
+      const lat = parseFloat(document.getElementById('new-lat').value);
+      const lon = parseFloat(document.getElementById('new-lon').value);
+      const alt = parseInt(document.getElementById('new-alt').value)||null;
+      const spd = parseInt(document.getElementById('new-spd').value)||null;
+      if (fix && !isNaN(lat) && !isNaN(lon)) {
+        state.mcdu.FPLAN.push({fix,lat,lon,alt,spd});
+        saveState();
+      }
+    };
+    // Save/refresh after manual editing
+    document.getElementById('savefplan').onclick = () => {
+      document.querySelectorAll('.mcdu-fix').forEach(inp=>{
+        let idx=parseInt(inp.dataset.idx); state.mcdu.FPLAN[idx].fix=inp.value;
       });
-    }
-    if (ev.target.classList.contains("page")) {
-      setState(s => s.aircraft.mcdu.page = ev.target.dataset.page === "INIT" ? "INITA" : ev.target.dataset.page);
-    }
-  });
-
-  // ATC Panel
-  ui.atc.addEventListener("click", function(ev) {
-    if (ev.target.id === "atc-contact-btn") {
-      setState(s => s.aircraft.atc.lastMessage = "ATC contact acknowledged (stub)");
-    }
-  });
-});
-
-/* ---- MAIN LOOP ---- */
-
-// Time tracking for deltaTime updates
-let lastTick = performance.now();
-
-function mainLoop(now = performance.now()) {
-  const acft = state.aircraft;
-  const dt = (now - lastTick) / 1000.0;
-  lastTick = now;
-  // Only if powered up
-  if (acft.overhead.battery || acft.overhead.externalPower || acft.overhead.apuOn) {
-    // Main simulation steps
-    autopilotLogic(acft, dt);
-    updateFuel(acft, dt);
+      document.querySelectorAll('.mcdu-lat').forEach(inp=>{
+        let idx=parseInt(inp.dataset.idx); state.mcdu.FPLAN[idx].lat=parseFloat(inp.value)||state.mcdu.FPLAN[idx].lat;
+      });
+      document.querySelectorAll('.mcdu-lon').forEach(inp=>{
+        let idx=parseInt(inp.dataset.idx); state.mcdu.FPLAN[idx].lon=parseFloat(inp.value)||state.mcdu.FPLAN[idx].lon;
+      });
+      document.querySelectorAll('.mcdu-alt').forEach(inp=>{
+        let idx=parseInt(inp.dataset.idx); state.mcdu.FPLAN[idx].alt=parseInt(inp.value)||state.mcdu.FPLAN[idx].alt;
+      });
+      document.querySelectorAll('.mcdu-spd').forEach(inp=>{
+        let idx=parseInt(inp.dataset.idx); state.mcdu.FPLAN[idx].spd=parseInt(inp.value)||state.mcdu.FPLAN[idx].spd;
+      });
+      saveState();
+    };
   }
-  // Aircraft movement: crude for demo
-  if (acft.autopilot.enabled) {
-    // Drift along heading at 250 kts (simulate GS)
-    const pos = moveAircraft(acft.flight.lat, acft.flight.lon, acft.flight.hdg, (acft.flight.gs || 2.5) * dt / 3600);
-    acft.flight.lat = pos.lat;
-    acft.flight.lon = pos.lon;
+  function renderMCDU_PERF() {
+    const pf = state.mcdu.PERF;
+    document.getElementById('mcdu-page-content').innerHTML = `
+      <form id="perfForm">
+        <label>ZFW (t): <input name="zfw" value="${pf.zfw}" type="number" step="0.1"></label>
+        <label>Reserves (t): <input name="res" value="${pf.res}" type="number" step="0.1"></label>
+        <label>Cost idx: <input name="ci" value="${pf.ci}" type="number"></label>
+        <label>TO Flaps: <input name="toflaps" value="${pf.takeoffFlaps}" maxlength="4"></label>
+        <label>V1: <input name="v1" value="${pf.v1}" type="number"></label>
+        <label>Vr: <input name="vr" value="${pf.vr}" type="number"></label>
+        <label>V2: <input name="v2" value="${pf.v2}" type="number"></label>
+        <button type="submit">Save</button>
+      </form>
+    `;
+    document.getElementById('perfForm').onsubmit = e=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      pf.zfw=parseFloat(fd.get('zfw'))||pf.zfw;
+      pf.res=parseFloat(fd.get('res'))||pf.res;
+      pf.ci=parseInt(fd.get('ci')) || pf.ci;
+      pf.takeoffFlaps = fd.get('toflaps');
+      pf.v1=parseInt(fd.get('v1'))||pf.v1;
+      pf.vr=parseInt(fd.get('vr'))||pf.vr;
+      pf.v2=parseInt(fd.get('v2'))||pf.v2;
+      saveState();
+    };
   }
-  notify();
-  requestAnimationFrame(mainLoop);
-}
 
-// Initial Cold & Dark state
-coldAndDarkStart();
+  // --- ATC Log Panel (as overlay in PFD) ---
+  function renderATCLog() {
+    if (state.atcLog.length) {
+      const atcPanelId = 'ifrs-atc-log';
+      let el = document.getElementById(atcPanelId);
+      if (!el) {
+        el = document.createElement('div');
+        el.id = atcPanelId;
+        el.style = 'position:absolute;right:14px;top:16px;background:rgba(10,14,36,0.90);color:#9fc;min-width:180px;max-width:300px;border:2px solid #23a4ff;border-radius:14px;font:13px monospace;z-index:99;padding:8px 16px;';
+        pfdCanvas.parentElement.appendChild(el);
+      }
+      // Render most recent 3 lines
+      el.innerHTML = state.atcLog.slice(-3).map(line=>`<div>[ATC] ${line.line}</div>`).join('');
+    }
+  }
 
-// Start main loop
-mainLoop();
+  // ---------------------------
+  // Main Simulation Loop Logic
+  // ---------------------------
+
+  function mainLoop() {
+    // Simulate time
+    state.time += 1/60;
+
+    // Power management
+    state.busPowered = state.batteryOn && (state.extPwrOn || state.apuGenOn);
+
+    // Simulate avionics and alignment
+    state.avionicsOn = isAvionicsPowered();
+
+    // Attitude simulation (simple airplane physics)
+    if (state.apOn) {
+      // Autopilot logic
+      if (state.apMode === 'HDG') {
+        let err = (state.apTarget.hdg - state.heading + 540) % 360 - 180;
+        state.heading = (state.heading + Math.sign(err)*Math.min(Math.abs(err),1.6)) % 360;
+      }
+      if (state.apMode === 'ALT') {
+        let err = state.apTarget.alt - state.altitude;
+        state.vspeed = Math.max(Math.min(err/6,2100),-2100);
+        if (Math.abs(err)<8) state.vspeed = 0;
+      }
+      if (state.apMode === 'SPD') {
+        let err = state.apTarget.spd - state.airspeed;
+        state.airspeed += Math.sign(err)*Math.min(Math.abs(err),1);
+      }
+      // LNAV logic
+      if ((state.lnavActive || state.apMode==='LNAV') && getActiveFPLWaypoint()) {
+        const wp = getActiveFPLWaypoint();
+        const dest = {lat:wp.lat,lon:wp.lon};
+        let brg = bearingTo(state.position, dest);
+        let err = (brg-state.heading+540)%360-180;
+        state.heading = (state.heading + Math.sign(err)*Math.min(Math.abs(err),1.4))%360;
+        // Advance to next WP if close (<3NM)
+        let dist = haversine(state.position, dest);
+        if (dist < 3) nextWaypoint();
+      }
+      // VNAV logic
+      if ((state.vnavActive || state.apMode==='VNAV') && getActiveFPLWaypoint()) {
+        const wp = getActiveFPLWaypoint();
+        if (wp.alt) {
+          let err = wp.alt-state.altitude;
+          state.vspeed = Math.max(Math.min(err/6,2300),-2300);
+          if (Math.abs(err)<16) state.vspeed = 0;
+        }
+      }
+      // Path update
+      state.altitude += state.vspeed/60;
+      state.airspeed = Math.max(state.airspeed,80);
+      // Aircraft movement
+      const gs = Math.max(state.airspeed*0.9,70); // knots, to NM/h
+      let hdgRad = deg2rad(state.heading);
+      state.position.lat += (gs/3600)*Math.cos(hdgRad)/60; // crude, lat per deg ~60NM
+      state.position.lon += (gs/3600)*Math.sin(hdgRad)/Math.cos(deg2rad(state.position.lat))/60;
+    }
+
+    // Simulate pitch/roll
+    state.attitude.pitch = Math.max(Math.min((state.vspeed/700), 18), -18);
+    state.attitude.roll = Math.max(Math.min((state.heading - (getActiveFPLWaypoint() ? bearingTo(state.position, getActiveFPLWaypoint()) : state.heading))/2,30),-30);
+
+    // Fuel
+    updateFuelBurn(1/60);
+    if (state.fuelTankL < 5 && state.eng1Running) state.eng1Running = false;
+    if (state.fuelTankR < 5 && state.eng2Running) state.eng2Running = false;
+
+    // Save state every 10 seconds
+    if (Math.floor(state.time)%10===0) saveState();
+
+    // Repaint panels/UI
+    renderOverheadPanel();
+    renderEnginePanel();
+    renderAutopilotPanel();
+    renderATCLog();
+    renderMCDU();
+    drawPFD();
+    drawND();
+    updateLeaflet();
+
+    requestAnimationFrame(mainLoop);
+  }
+
+  // ---------------------------
+  // Initialization and Cold & Dark Management
+  // ---------------------------
+
+  function firstRunInit() {
+    loadState();
+    if (isColdAndDark()) {
+      state.apuOn = false;
+      state.apuGenOn = false;
+      state.irsAligned = false;
+      state.eng1Running = false;
+      state.eng2Running = false;
+      state.batteryOn = false;
+      state.extPwrOn = false;
+      state.lnavActive = false;
+      state.vnavActive = false;
+      state.atcLog = [];
+      if (!state.mcdu.FPLAN.length) {
+        // Generic route for demonstration
+        state.mcdu.FPLAN =
+          [{fix:'LON',lat:51.509,lon:-0.12,alt:5000,spd:220},
+           {fix:'MID',lat:50.867,lon:-0.145,alt:12000,spd:330},
+           {fix:'BES',lat:48.857,lon:-1.608,alt:35000,spd:440},
+           {fix:'NCE',lat:43.665,lon:7.215,alt:5000,spd:220}];
+      }
+    }
+    initLeaflet();
+    switchPanel('PFD');
+    mainLoop();
+  }
+
+  // On DOM ready / sim loaded
+  window.addEventListener('DOMContentLoaded', firstRunInit);
+
+})();
