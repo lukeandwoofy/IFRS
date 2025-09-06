@@ -237,6 +237,32 @@
         <button id="emerBtn" style="background:${state.emerLights?'#fdfc07':'#333'}">EMER LT</button>
       </div>
     `;
+
+    const AirportDB = { … };
+
+// add helpers here
+function blockSwitch(label, id, on) {
+  return `
+    <div class="switch" style="display:flex; align-items:center; gap:.5rem; margin:.25rem 0;">
+      <span>${label}</span>
+      <button id="${id}">${on ? 'ON' : 'OFF'}</button>
+    </div>
+  `;
+}
+
+function blockToggle(label, id, on, onTxt = 'ON', offTxt = 'OFF') {
+  return `
+    <div class="switch" style="display:flex; align-items:center; gap:.5rem; margin:.25rem 0;">
+      <span>${label}</span>
+      <button id="${id}">${on ? onTxt : offTxt}</button>
+    </div>
+  `;
+}
+
+// now your panel functions
+function renderOverheadPanel() {
+    // …
+}
     // Wire events
     document.getElementById('batteryBtn').onclick = ()=>{ state.batteryOn=!state.batteryOn;saveState();};
     document.getElementById('extPwrBtn').onclick = ()=>{ state.extPwrOn=!state.extPwrOn;saveState();};
