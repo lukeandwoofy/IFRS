@@ -1,572 +1,790 @@
-// IFRS Flight Simulator UI - All Cockpit Panels, ND, Leaflet GPS, MCDU, and System Logic
-// Drop-in ready for IFRS/IFR/analog instrument JS simulator projects
-// Consistent, modular, and maintainable
+// IFRS Glass Cockpit UI Implementation
+// All Panels, ND, Leaflet Integration, MCDU Full (INIT A, F-PLAN, PERF), Cold & Dark, Autopilot (LNAV/VNAV), ATC Stub
+// Author: IFRS Instrument Flight Rules Simulator Team (2025)
+// Strict mode, ES2021+ syntax. Fully modular, ready to drop into IFRS project.
 
-// --------------- Global State ---------------------------
+"use strict";
 
+/* ---- STATE MANAGEMENT SECTION ---- */
+
+// Top-level state object
 const state = {
-  // Flight phase state machine
-  flightPhase: 'cold_dark', // cold_dark, systems_active, engines_running, ready_for_taxi, in_flight, post_flight
-  // Electrical, engines, and panel readiness
-  electricalOn: false,
-  apuOn: false,
-  enginesRunning: false,
-
-  // Autopilot state machine (manual, lnav, vnav, lnav_vnav)
-  autopilotMode: 'manual',
-
-  // Fuel and engine
-  totalFuel: 12000, // kg
-  fuelFlowRate: 0,  // kg/s, set by engine state
-  lastFuelUpdate: Date.now(),
-
-  // Flight params
-  pitch: 0,
-  roll: 0,
-  hdg_true: 0,
-
-  // Navigation / Position (mock/test values)
-  position: { lat: 51.505, lon: -0.09, alt: 0, gs: 0 },
-  route: [], // [{ id, lat, lon, alt, speed }]
-  currentLeg: 0,
-
-  // ND panel
-  ndRange: 40, // NM
-
-  // MCDU INIT A state
-  mcduInitA: {
-    fromTo: '',
-    flightNumber: '',
-    costIndex: '',
-    crzFL: '',
-    temperature: '',
-    wind: ''
-  },
-
-  // MCDU F-PLAN state
-  mcduFPlan: {
-    waypoints: [] // [{ id, lat, lon, alt, spd }]
-  },
-
-  // MCDU PERF page state
-  mcduPerf: {
-    takeoff: {
-      v1: '',
-      vr: '',
-      v2: '',
-      flapSetting: '',
-      flexTemp: '',
-      transAlt: '',
-      thrRed: '',
-      accelAlt: '',
-      engOutAccel: ''
+  aircraft: {
+    powered: false,
+    coldAndDark: true,
+    overhead: {
+      battery: false,
+      externalPower: false,
+      apuAvailable: false,
+      apuOn: false,
+      fuelPumps: false,
+      hydraulics: false,
+      lights: {
+        beacon: false,
+        nav: false,
+        strobe: false,
+        landing: false,
+        taxi: false,
+      },
+      airConditioning: false,
     },
-    climb: {
-      ci: '',
-      managedSpd: '',
-      selectedSpd: ''
+    engines: [
+      { master: false, running: false, n1: 0, n2: 0, egt: 0, fuelFlow: 0 },
+      { master: false, running: false, n1: 0, n2: 0, egt: 0, fuelFlow: 0 },
+    ],
+    fuel: {
+      quantity: 10000,    // in kilograms
+      capacity: 10000,
+      burnRate: 0,        // kg/h, updated dynamically
     },
-    cruise: {
-      ci: '',
-      managedSpd: '',
-      selectedSpd: ''
+    flight: {
+      altitude: 0,
+      vs: 0,
+      hdg: 0,
+      ias: 0,
+      tas: 0,
+      gs: 0,
+      pitch: 0,
+      bank: 0,
+      yaw: 0,
+      lat: 0,
+      lon: 0,
     },
-    descent: {
-      ci: '',
-      managedSpd: '',
-      selectedSpd: ''
+    autopilot: {
+      enabled: false,
+      lnav: false,
+      vnav: false,
+      heading: 0,
+      altSel: 0,
+      speedSel: 0,
+      vsSel: 0,
+      mode: "OFF",      // "HDG", "LNAV", etc.
+      armed: {
+        lnav: false,
+        vnav: false,
+      },
     },
-    approach: {
-      qnh: '',
-      temp: '',
-      wind: '',
-      transAlt: '',
-      vApp: '',
-      config: 'CONF3' // or 'FULL'
-    }
-  },
-
-  // ATC messages queue
-  atcMessages: [],
-
-  // --- Leaflet & Map
-  leafletMap: null
+    fms: {
+      flightPlan: [],      // array of waypoints (lat,lon,alt)
+      perf: {},
+      initA: {
+        from: "",    // ICAO
+        to: "",      // ICAO
+        flightNumber: "",
+        costIndex: "",
+        cruiseLevel: "",
+        cruiseTemp: "",
+      },
+      perfPages: {
+        current: "TAKEOFF", // "TAKEOFF", "CLIMB", etc.
+        data: {},
+      },
+      position: 0,   // index in FPLN
+    },
+    mcdu: {
+      page: "MENU", // "INITA", "FPLN", "PERF", etc.
+      scratchpad: "",
+      selectedField: null,
+    },
+    atc: {
+      lastMessage: "",
+      stubEnabled: true,
+    },
+    isInitialized: false, // for startup
+  }
 };
 
-// --------------- State Machine Helpers ------------------
-const flightPhases = ['cold_dark', 'systems_active', 'engines_running', 'ready_for_taxi', 'in_flight', 'post_flight'];
+/* ---- SUBSCRIBERS & STATE MANAGEMENT ---- */
 
-// Flight phase state transitions
-function setFlightPhase(next) {
-  if (flightPhases.includes(next)) {
-    state.flightPhase = next;
-    // State-phase side effects
-    if (next === 'cold_dark') {
-      state.electricalOn = false;
-      state.apuOn = false;
-      state.enginesRunning = false;
-      state.autopilotMode = 'manual';
-      state.fuelFlowRate = 0;
-    }
-    if (next === 'systems_active') state.electricalOn = true;
-    if (next === 'engines_running') {
-      state.electricalOn = true;
-      state.enginesRunning = true;
-      state.fuelFlowRate = 15;
-    }
-    if (next === 'in_flight') {
-      state.autopilotMode = 'manual';
-    }
-    if (next === 'post_flight') {
-      state.enginesRunning = false;
-      state.fuelFlowRate = 0;
-    }
-  }
+const subscribers = [];
+
+function subscribe(fn) {
+  subscribers.push(fn);
+}
+function notify() {
+  subscribers.forEach(fn => fn(state));
+}
+function setState(mutator) {
+  mutator(state);
+  notify();
 }
 
-// Autopilot logic
-function setAutopilotMode(mode) {
-  const valid = ['manual', 'lnav', 'vnav', 'lnav_vnav'];
-  if (!valid.includes(mode)) return;
-  state.autopilotMode = mode;
-  // Could add: logic to synchronize with ND and AP displays
+/* ---- HELPER FUNCTIONS ---- */
+
+// Clamp a value between min and max
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
 
-// --- Helper: Clamp number
-function clamp(val, min, max) {
-  return Math.max(min, Math.min(max, val));
+// Format number to n decimals
+function fmt(n, d = 0) {
+  return Number.parseFloat(n).toFixed(d);
 }
 
-// --- ATC Voice Stub
-function atcVoiceStub(message) {
-  // Placeholder for real ATC subsystem (e.g. speech synthesis or socket)
-  state.atcMessages.push({ text: message, ts: new Date() });
-  if (state.atcMessages.length > 5) state.atcMessages.shift();
-  console.log('[ATC]', message);
+// ICAO Uppercase validation
+function validIcao(s) {
+  return !!/^[A-Z]{4}$/.test((s || "").toUpperCase());
 }
 
-// --------------- Fuel Burn Logic (per Dancila/Botez model basic implementation) ---------
-
-function updateFuelBurn() {
-  // Compute time step
-  const now = Date.now();
-  const deltaSec = clamp((now - state.lastFuelUpdate) / 1000, 0, 10);
-  state.lastFuelUpdate = now;
-
-  if (state.enginesRunning && state.totalFuel > 0) {
-    let burn = state.fuelFlowRate * deltaSec;
-    burn = clamp(burn, 0, state.totalFuel);
-    state.totalFuel -= burn;
-  }
-  if (state.totalFuel < 0.1) {
-    state.totalFuel = 0;
-    // Could trigger shutdown if needed
-    setFlightPhase('post_flight');
-  }
+// Simplified fuel burn calculation (derate based on N1)
+function computeFuelBurn(engine) {
+  if (!engine.running || engine.n1 < 10) return 0;
+  const base = 2500; // kg/hr at 100% N1
+  return base * (engine.n1 / 100);
 }
 
-function getFuelPercent() {
-  return Math.round(100 * state.totalFuel / 12000);
+// MCDU Field Text Helper
+function mcduLine(str, len = 24) {
+  // Pads/truncates string for display
+  return (str + " ".repeat(len)).slice(0, len);
 }
 
-// --------------- Panel Rendering Functions ------------------
-
-// --- Overhead Panel
-function renderOverheadPanel() {
-  const c = document.getElementById('overhead-panel');
-  if (!c) return;
-  c.innerHTML = `
-    <div class="panel-title">Overhead Panel</div>
-    <button id="btn-power-on" ${state.electricalOn ? 'disabled' : ''}>Power On</button>
-    <button id="btn-apu-start" ${state.apuOn ? 'disabled' : !state.electricalOn ? 'disabled' : ''}>APU Start</button>
-    <button id="btn-engines-start" ${state.enginesRunning ? 'disabled' : !state.apuOn ? 'disabled' : ''}>Engine Start</button>
-    <span style="margin-left:20px">Electrical: <b>${state.electricalOn ? 'ON' : 'OFF'}</b></span>
-    <span style="margin-left:15px">APU: <b>${state.apuOn ? 'ON' : 'OFF'}</b></span>
-    <span style="margin-left:15px">Engines: <b>${state.enginesRunning ? 'ON' : 'OFF'}</b></span>
-  `;
-  // Button actions
-  setTimeout(() => {
-    const pwr = document.getElementById('btn-power-on');
-    if (pwr) pwr.onclick = () => { setFlightPhase('systems_active'); renderAllUIPanels(); };
-    const apu = document.getElementById('btn-apu-start');
-    if (apu) apu.onclick = () => { state.apuOn = true; renderAllUIPanels(); };
-    const eng = document.getElementById('btn-engines-start');
-    if (eng) eng.onclick = () => { setFlightPhase('engines_running'); renderAllUIPanels(); };
-  }, 0);
+// Geodetic calculations for ND, move aircraft
+function moveAircraft(lat, lon, hdg, distNm) {
+  const R = 3440.07; // nautical miles earth radius
+  const hdgRad = hdg * (Math.PI / 180);
+  const d = distNm / R;
+  const lat1 = lat * (Math.PI / 180);
+  const lon1 = lon * (Math.PI / 180);
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) +
+    Math.cos(lat1) * Math.sin(d) * Math.cos(hdgRad));
+  const lon2 = lon1 + Math.atan2(
+    Math.sin(hdgRad) * Math.sin(d) * Math.cos(lat1),
+    Math.cos(d) - Math.sin(lat1) * Math.sin(lat2)
+  );
+  return {
+    lat: lat2 * (180 / Math.PI),
+    lon: lon2 * (180 / Math.PI),
+  };
 }
 
-// --- Engine Panel
-function renderEnginePanel() {
-  const c = document.getElementById('engine-panel');
-  if (!c) return;
-  c.innerHTML = `
-    <div class="panel-title">Engine Panel</div>
-    <div>Fuel Onboard: <b><span id="fuel-qty">${state.totalFuel.toFixed(0)}</span> kg</b> (${getFuelPercent()}%)</div>
-    <div>Engine(s): <b>${state.enginesRunning ? 'RUNNING' : 'OFF'}</b></div>
-    <div>Fuel Flow: <b>${state.fuelFlowRate} kg/s</b></div>
-  `;
+// Simple color util
+function getBatteryColor(on) {
+  return on ? "#51ff55" : "#ccc";
 }
 
-// --- Autopilot Panel
-function renderAutopilotPanel() {
-  const c = document.getElementById('autopilot-panel');
-  if (!c) return;
-  c.innerHTML = `
-    <div class="panel-title">Autopilot Panel</div>
+/* ---- PANEL RENDERING FUNCTIONS ---- */
+
+function renderOverheadPanel(el, st) {
+  el.innerHTML = `
+    <h3>Overhead Panel</h3>
     <div>
-      <button id="btn-ap-lnav" ${state.autopilotMode === 'lnav' || state.autopilotMode === 'lnav_vnav' ? 'disabled' : ''}>LNAV</button>
-      <button id="btn-ap-vnav" ${state.autopilotMode === 'vnav' || state.autopilotMode === 'lnav_vnav' ? 'disabled' : ''}>VNAV</button>
-      <button id="btn-ap-off" ${state.autopilotMode === 'manual' ? 'disabled' : ''}>AP OFF</button>
+      <button id="battery-btn" style="background:${getBatteryColor(st.battery)}">Battery</button>
+      <button id="extpower-btn" ${st.battery ? "" : "disabled"}>${st.externalPower ? "EXT PWR ON" : "EXT PWR OFF"}</button>
     </div>
-    <div>Mode: <b>${state.autopilotMode.toUpperCase()}</b></div>
+    <div>
+      <button id="apu-btn" ${st.battery ? "" : "disabled"}>${st.apuOn ? "APU ON" : "APU OFF"}</button>
+      <span>APU AVAILABLE: <strong>${st.apuAvailable ? "✔" : "✖"}</strong></span>
+    </div>
+    <div>
+      <label><input type="checkbox" id="fuelPumps-btn" ${st.fuelPumps ? "checked" : ""}> Fuel Pumps</label>
+      <label><input type="checkbox" id="hydraulics-btn" ${st.hydraulics ? "checked" : ""}> Hydraulics</label>
+    </div>
+    <div>
+      <fieldset>
+        <legend>Lighting</legend>
+        ${Object.entries(st.lights).map(([k, v]) =>
+          `<label><input type="checkbox" class="light-btn" data-light="${k}" ${v ? "checked" : ""}> ${k.charAt(0).toUpperCase() + k.slice(1)}</label>`
+        ).join(" ")}
+      </fieldset>
+    </div>
+    <div>
+      <label><input type="checkbox" id="ac-btn" ${st.airConditioning ? "checked" : ""}> Air Conditioning</label>
+    </div>
   `;
-  setTimeout(() => {
-    document.getElementById('btn-ap-lnav')?.addEventListener('click', () => {
-      if (state.autopilotMode === 'vnav') setAutopilotMode('lnav_vnav');
-      else setAutopilotMode('lnav');
-      renderAllUIPanels();
-    });
-    document.getElementById('btn-ap-vnav')?.addEventListener('click', () => {
-      if (state.autopilotMode === 'lnav') setAutopilotMode('lnav_vnav');
-      else setAutopilotMode('vnav');
-      renderAllUIPanels();
-    });
-    document.getElementById('btn-ap-off')?.addEventListener('click', () => {
-      setAutopilotMode('manual');
-      renderAllUIPanels();
-    });
-  }, 0);
 }
 
-// --- PFD (Primary Flight Display) including Artificial Horizon
-function renderPFD() {
-  const canvas = document.getElementById('pfd-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
+function renderEnginePanel(el, st, engines, fuel) {
+  el.innerHTML = `
+    <h3>Engine Panel</h3>
+    ${engines.map((eng, idx) => `
+      <div class="engine">
+        <button id="eng-master-${idx}" ${fuel.fuelPumps ? "" : "disabled"}>${eng.master ? "MASTER ON" : "MASTER OFF"}</button>
+        <span>N1: ${fmt(eng.n1,1)}%</span>
+        <span>N2: ${fmt(eng.n2,1)}%</span>
+        <span>EGT: ${fmt(eng.egt,0)}°C</span>
+        <span>Fuel Flow: ${fmt(eng.fuelFlow,0)} kg/h</span>
+        <span>Status: ${eng.running ? "RUNNING" : "STOPPED"}</span>
+      </div>
+    `).join("")}
+    <div>Fuel: ${fmt(fuel.quantity,0)} kg / ${fmt(fuel.capacity,0)} kg</div>
+  `;
+}
+
+function renderAutopilotPanel(el, ap, fms) {
+  el.innerHTML = `
+    <h3>Autopilot Panel (AP)</h3>
+    <div>
+      <label>HDG: <input id="ap-hdg" type="number" value="${fmt(ap.heading,0)}" min="0" max="359"></label>
+      <label>ALT: <input id="ap-alt" type="number" value="${fmt(ap.altSel,0)}" min="0" max="45000"></label>
+      <label>SPD: <input id="ap-spd" type="number" value="${fmt(ap.speedSel,0)}" min="80" max="500"></label>
+      <label>VS: <input id="ap-vs" type="number" value="${fmt(ap.vsSel,0)}" min="-8000" max="8000"></label>
+    </div>
+    <div>
+      <button id="ap-onoff">${ap.enabled ? "DISENGAGE AP" : "ENGAGE AP"}</button>
+      <label><input type="checkbox" id="ap-lnav" ${ap.lnav ? "checked" : ""} ${fms.flightPlan.length > 1 ? "" : "disabled"}> LNAV</label>
+      <label><input type="checkbox" id="ap-vnav" ${ap.vnav ? "checked" : ""} ${fms.initA.cruiseLevel ? "" : "disabled"}> VNAV</label>
+      <span>Mode: <strong>${ap.mode}</strong></span>
+    </div>
+  `;
+}
+
+function renderPFD(el, flt, ap) {
+  // Simple canvas PFD with attitude indicator (artificial horizon)
+  el.innerHTML = `<canvas id="pfd-canvas" width="350" height="350"></canvas>
+    <div>
+      <span>IAS: <strong>${fmt(flt.ias,0)}</strong> kts</span>
+      <span>ALT: <strong>${fmt(flt.altitude,0)}</strong> ft</span>
+      <span>VS: <strong>${fmt(flt.vs,0)}</strong> fpm</span>
+      <span>HDG: <strong>${fmt(flt.hdg,0)}</strong>°</span>
+      <span>AP: <strong>${ap.enabled ? "ON" : "OFF"}</strong></span>
+    </div>
+  `;
+  const c = el.querySelector("#pfd-canvas");
+  if (c && c.getContext) drawPfdCanvas(c, flt);
+}
+
+function drawPfdCanvas(canvas, flt) {
+  const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // Draw artificial horizon
-  renderArtificialHorizon(state.pitch, state.roll, ctx);
-
-  ctx.fillStyle = 'lime';
-  ctx.font = '18px monospace';
-  ctx.fillText("PFD", 12, 22);
-
-  // Show HDG, AP status
-  ctx.fillStyle = 'white';
-  ctx.font = '14px Arial';
-  ctx.fillText(`HDG ${state.hdg_true.toFixed(0)}°`, 12, 45);
-  ctx.fillText(`AP: ${state.autopilotMode.toUpperCase()}`, 12, 62);
-}
-
-// --- Artificial Horizon Helper (basic attitude ball only)
-function renderArtificialHorizon(pitch, roll, ctx) {
-  const w = ctx.canvas.width;
-  const h = ctx.canvas.height;
+  // Artificial horizon
+  const cx = 175, cy = 175;
+  const radius = 100;
+  // Draw sky
   ctx.save();
-  ctx.clearRect(0, 0, w, h);
-
-  // Horizon bars, pitch as pixels (8 px per deg)
-  ctx.translate(w/2, h/2);
-  ctx.rotate(-roll*Math.PI/180);
-  // Sky
-  ctx.fillStyle = '#58aeea';
-  ctx.fillRect(-w, -h, 2*w, h/2 + pitch*8);
-  // Ground
-  ctx.fillStyle = '#c2a159';
-  ctx.fillRect(-w, pitch*8, 2*w, h/2-pitch*8);
-  // Horizon line
-  ctx.strokeStyle = 'white';
+  ctx.translate(cx, cy + flt.pitch * -1.5); // negative pitch is up in screen coords
+  ctx.rotate(-flt.bank * Math.PI / 180);
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+  ctx.closePath();
+  ctx.fillStyle = "#8ecae6";
+  ctx.fill();
+  // Draw ground
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, Math.PI, 2 * Math.PI);
+  ctx.closePath();
+  ctx.fillStyle = "#b08968";
+  ctx.fill();
+  // Draw horizon line
+  ctx.strokeStyle = "#ddd";
   ctx.lineWidth = 4;
   ctx.beginPath();
-  ctx.moveTo(-w, pitch*8);
-  ctx.lineTo(w, pitch*8);
+  ctx.moveTo(-radius, 0);
+  ctx.lineTo(radius, 0);
   ctx.stroke();
+  ctx.restore();
 
-  // Aircraft symbol
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = 'yellow';
-  ctx.beginPath();
-  ctx.moveTo(-20,0);
-  ctx.lineTo(20,0);
-  ctx.moveTo(0,-10);
-  ctx.lineTo(0,10);
-  ctx.stroke();
+  // Draw bank marks
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 2;
+  for(let i = -60; i <= 60; i += 30) {
+    ctx.rotate(i * Math.PI / 180);
+    ctx.beginPath();
+    ctx.moveTo(0, -radius);
+    ctx.lineTo(0, -radius + 15);
+    ctx.stroke();
+    ctx.rotate(-i * Math.PI / 180);
+  }
   ctx.restore();
 }
 
-// --- ND Navigation Display (canvas)
-function renderND() {
-  const canvas = document.getElementById('nd-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+/* -- ND DIRECTIONAL MAP (CANVAS) -- */
 
-  // ND center: ownship bottom center
-  const cx = canvas.width/2, cy = canvas.height-40;
-  // Draw compass arc
+function renderND(el, flt, fms, ap) {
+  el.innerHTML = `<canvas id="nd-canvas" width="350" height="350"></canvas>
+    <div><span>TRK: <strong>${fmt(flt.hdg,0)}°</strong></span> | GS: ${fmt(flt.gs,0)} kts</div>
+  `;
+  const c = el.querySelector("#nd-canvas");
+  if (c && c.getContext) drawNdCanvas(c, flt, fms, ap);
+}
+
+function drawNdCanvas(canvas, flt, fms, ap) {
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const cx = 175, cy = 175, radius = 130;
+  // Draw compass rose
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.strokeStyle = 'white';
-  ctx.lineWidth = 2;
+  ctx.rotate(-flt.hdg * Math.PI / 180);
+  ctx.strokeStyle = "#aaa";
+  ctx.lineWidth = 4;
   ctx.beginPath();
-  ctx.arc(0,0,120,Math.PI,2*Math.PI);
+  ctx.arc(0, 0, radius, 0, 2 * Math.PI);
   ctx.stroke();
-  // Draw ticks every 30 deg
-  for (let a=0; a<180; a+=30) {
-    let rad = (a-90)*Math.PI/180;
+  // Draw heading bug
+  ctx.save();
+  ctx.rotate((ap.heading - flt.hdg) * Math.PI / 180);
+  ctx.strokeStyle = "yellow";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(0, -radius);
+  ctx.lineTo(0, -radius + 25);
+  ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+
+  // Plot flight plan waypoints (simple straight lines)
+  if (fms.flightPlan && fms.flightPlan.length > 1) {
     ctx.save();
-    ctx.rotate(rad);
+    ctx.translate(cx, cy);
+    ctx.strokeStyle = "#8ecae6";
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(0,-100);
-    ctx.lineTo(0, -120);
+    ctx.moveTo(0, 0);
+    let prevWp = { lat: flt.lat, lon: flt.lon };
+    for (let i = 0; i < 2 && fms.position + i < fms.flightPlan.length; ++i) {
+      const wp = fms.flightPlan[fms.position + i];
+      const hdgToWp = getHeadingBetween(prevWp, wp);
+      const distNm = getDistanceNM(prevWp, wp);
+      const angle = (hdgToWp - flt.hdg) * Math.PI / 180;
+      const r = clamp(distNm * 10, 10, radius);
+      ctx.lineTo(Math.sin(angle) * r, -Math.cos(angle) * r);
+      prevWp = wp;
+    }
     ctx.stroke();
     ctx.restore();
   }
-  // Heading bug (ownship)
-  ctx.strokeStyle = 'yellow';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(0, -105);
-  ctx.lineTo(0, -120);
-  ctx.stroke();
-
-  // Draw route legs (if any)
-  ctx.strokeStyle = 'cyan';
-  ctx.lineWidth = 2;
-  if (state.mcduFPlan.waypoints.length > 1) {
-    ctx.beginPath();
-    ctx.moveTo(0,0);
-    for (let i=1; i<state.mcduFPlan.waypoints.length; ++i) {
-      // Simple mock: each WP 50px up
-      ctx.lineTo(0, -i*50);
-    }
-    ctx.stroke();
-    // Waypoint names
-    ctx.font = '11px Arial';
-    for (let i=0; i<state.mcduFPlan.waypoints.length; ++i) {
-      ctx.fillText(state.mcduFPlan.waypoints[i].id||('-'+i), 10, -i*50);
-    }
-  }
-
-  ctx.restore();
-  ctx.fillStyle = 'white';
-  ctx.font = '14px Arial';
-  ctx.fillText("ND Range: "+state.ndRange+"NM", 14, 25);
 }
 
-// --- Leaflet Map (separate DOM)
-function initializeLeafletMap() {
-  if (!window.L) return;
-  state.leafletMap = L.map('leaflet-map').setView([state.position.lat, state.position.lon], 5);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: 'IFRS &copy; OpenStreetMap contributors'
-  }).addTo(state.leafletMap);
-  // Aircraft marker
-  const ownIcon = L.icon({
-    iconUrl: 'https://cdn-icons-png.flaticon.com/512/3884/3884367.png',
-    iconSize: [32,32]
+function getHeadingBetween(from, to) {
+  if (!(from && to)) return 0;
+  const dLon = (to.lon - from.lon) * Math.PI / 180;
+  const fromLat = from.lat * Math.PI / 180;
+  const toLat = to.lat * Math.PI / 180;
+  const y = Math.sin(dLon) * Math.cos(toLat);
+  const x = Math.cos(fromLat) * Math.sin(toLat) -
+            Math.sin(fromLat) * Math.cos(toLat) * Math.cos(dLon);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function getDistanceNM(a, b) {
+  if (!(a && b)) return 0;
+  const lat1 = a.lat * Math.PI / 180;
+  const lat2 = b.lat * Math.PI / 180;
+  const dLat = lat2 - lat1;
+  const dLon = (b.lon - a.lon) * Math.PI / 180;
+  const R = 3440.07; // nm
+  const s =
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1) * Math.cos(lat2) *
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
+}
+
+/* -- LEAFLET IFRS MAP -- */
+
+// Map object scoped to state
+let leafletMap = null;
+
+function renderLeafletMap(el, flt, fms) {
+  // Use Leaflet only if library loaded (`L`)
+  if (!window.L) {
+    el.innerHTML = `<div style="color:red">Leaflet.js library not found. IFRS Map unavailable.</div>`;
+    return;
+  }
+  el.innerHTML = `<div id="leaflet-map" style="width:350px;height:350px;background:#222"></div>`;
+  if (!leafletMap) {
+    leafletMap = L.map("leaflet-map").setView([flt.lat, flt.lon], 10);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 15,
+      attribution: ""
+    }).addTo(leafletMap);
+    leafletMap.flyTo([flt.lat, flt.lon], 10);
+    L.marker([flt.lat, flt.lon], {title: "You"}).addTo(leafletMap);
+  } else {
+    leafletMap.setView([flt.lat, flt.lon]);
+    // update marker...
+  }
+}
+
+/* ---- MCDU RENDERING AND LOGIC ---- */
+
+function renderMCDU(el, mcdu, fms) {
+  el.innerHTML = `
+    <div class="mcdu">
+      <h3>MCDU</h3>
+      <div class="mcdu-scr">${mcdu.scratchpad}</div>
+      <div class="mcdu-main">${renderMcduPage(mcdu, fms)}</div>
+      <div class="mcdu-keypad">
+        <div>
+          ${["A","B","C","D","E","F","G","H","I","J"].map(x =>
+            `<button class="key" data-key="${x}">${x}</button>`
+          ).join("")}
+        </div>
+        <div>
+          ${["K","L","M","N","O","P","Q","R","S","T"].map(x =>
+            `<button class="key" data-key="${x}">${x}</button>`
+          ).join("")}
+        </div>
+        <div>
+          ${["U","V","W","X","Y","Z","1","2","3","4"].map(x =>
+            `<button class="key" data-key="${x}">${x}</button>`
+          ).join("")}
+        </div>
+        <div>
+          ${["5","6","7","8","9","0","/",".","CLR","EXEC"].map(k =>
+            `<button class="key" data-key="${k}">${k}</button>`
+          ).join("")}
+        </div>
+        <div>
+          ${["LEFT", "RIGHT", "UP", "DOWN", "MENU", "INIT", "FPLN", "PERF"].map(k =>
+            `<button class="page" data-page="${k}">${k}</button>`
+          ).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+  // Add page switchers if needed
+}
+
+function renderMcduPage(mcdu, fms) {
+  switch(mcdu.page) {
+    case "INIT":
+    case "INITA":
+      return renderMcduInitA(fms.initA);
+    case "FPLN":
+      return renderMcduFPLN(fms.flightPlan, fms.position);
+    case "PERF":
+      return renderMcduPerf(fms.perfPages);
+    default:
+      return `
+        <div>
+          <button class="page" data-page="INIT">INIT A</button>
+          <button class="page" data-page="FPLN">F-PLAN</button>
+          <button class="page" data-page="PERF">PERF</button>
+        </div>
+      `;
+  }
+}
+
+function renderMcduInitA(initA) {
+  return `
+    <pre>
+${mcduLine("  INIT A                      ", 24)}
+${mcduLine(` FROM/TO   ${initA.from || "----"}/${initA.to || "----"}`, 24)}
+${mcduLine(` FLT NBR   ${initA.flightNumber || "----"}`, 24)}
+${mcduLine(` COST INDEX ${initA.costIndex || "---"}`, 24)}
+${mcduLine(` CRZ FL/TEMP ${initA.cruiseLevel || "---"}/${initA.cruiseTemp || "--"}`, 24)}
+${mcduLine(" IRS INIT>", 24)}
+    </pre>
+  `;
+}
+
+function renderMcduFPLN(fpln, pos) {
+  let lines = [
+    mcduLine("  F-PLAN               ACTIVE", 24),
+  ];
+  for(let i = Math.max(0, pos - 2); i < Math.min(fpln.length, pos+4); ++i) {
+    const wp = fpln[i];
+    lines.push(mcduLine(
+      `${i === pos ? "»" : " "} ${wp.ident}   ${fmt(wp.lat, 2)},${fmt(wp.lon, 2)} ${wp.alt ? `${wp.alt}ft` : ""}`,
+      24));
+  }
+  return `<pre>${lines.join("\n")}</pre>`;
+}
+
+/* Sample simple PERF rendering */
+function renderMcduPerf(perfPages) {
+  const p = perfPages.data[perfPages.current] || {};
+  return `
+    <pre>
+${mcduLine(` PERF - ${perfPages.current}  `, 24)}
+${mcduLine(` V1   ${p.V1 || "---"}`)}
+${mcduLine(` VR   ${p.VR || "---"}`)}
+${mcduLine(` V2   ${p.V2 || "---"}`)}
+${mcduLine(` THR RED ALT   ${p.thrRedAlt || "---"}`)}
+${mcduLine(` ACC ALT      ${p.accAlt || "---"}`)}
+    </pre>
+  `;
+}
+
+/* ---- ATC VOICE STUB ---- */
+
+function renderATCStub(el, atc) {
+  el.innerHTML = `
+    <h3>ATC (Stub)</h3>
+    <div>Last: <span id="atc-msg">${atc.lastMessage || "None"}</span></div>
+    <button id="atc-contact-btn">Send Contact</button>
+  `;
+}
+
+/* ---- COLD & DARK STARTUP LOGIC ---- */
+
+function coldAndDarkStart() {
+  setState(s => {
+    const ac = s.aircraft;
+    // Power OFF everything
+    ac.overhead.battery = false;
+    ac.overhead.externalPower = false;
+    ac.overhead.apuOn = false;
+    ac.overhead.apuAvailable = false;
+    ac.overhead.fuelPumps = false;
+    ac.overhead.hydraulics = false;
+    Object.keys(ac.overhead.lights).forEach(k => ac.overhead.lights[k] = false);
+    ac.overhead.airConditioning = false;
+    ac.engines.forEach(e => {
+      e.master = false;
+      e.running = false;
+      e.n1 = e.n2 = e.egt = e.fuelFlow = 0;
+    });
+    ac.autopilot.enabled = false;
+    ac.coldAndDark = true;
+    ac.powered = false;
+    ac.isInitialized = false;
   });
-  state.ownLeafletMarker = L.marker([state.position.lat, state.position.lon], {icon: ownIcon}).addTo(state.leafletMap).bindPopup('Ownship');
 }
 
-// --- MCDU rendering and logic
-function renderMCDU() {
-  const c = document.getElementById('mcdu-panel');
-  if (!c) return;
-  // Tab controls
-  let tabbar = `
-    <button class="mcdu-tab" id="tab-init-a">INIT A</button>
-    <button class="mcdu-tab" id="tab-fplan">F-PLAN</button>
-    <button class="mcdu-tab" id="tab-perf">PERF</button>
-  `;
-  c.innerHTML = `
-    <div class="panel-title">MCDU</div>
-    <div>${tabbar}</div>
-    <div id="mcdu-content"></div>
-    <div id="mcdu-input"></div>
-  `;
-  // Init A default
-  renderMCDUInitA();
-  setTimeout(() => {
-    document.getElementById('tab-init-a')?.addEventListener('click', renderMCDUInitA);
-    document.getElementById('tab-fplan')?.addEventListener('click', renderMCDUFPlan);
-    document.getElementById('tab-perf')?.addEventListener('click', renderMCDUPerf);
-  },0);
+function startupPowerFlow() {
+  // Simulate full startup sequence (battery → ext pwr → APU → fuel pumps)
+  setState(s => {
+    const oh = s.aircraft.overhead;
+    oh.battery = true;
+    setTimeout(() => {
+      setState(s2 => { s2.aircraft.overhead.externalPower = true; s2.aircraft.powered = true; notify(); });
+      setTimeout(() => {
+        setState(s3 => { s3.aircraft.overhead.apuOn = true; s3.aircraft.overhead.apuAvailable = true; notify(); });
+        setTimeout(() => {
+          setState(s4 => { s4.aircraft.overhead.fuelPumps = true; notify(); });
+          setTimeout(() => {
+            setState(s5 => {
+              s5.aircraft.isInitialized = true;
+              s5.aircraft.coldAndDark = false;
+              notify();
+            });
+          }, 500);
+        }, 700);
+      }, 1000);
+    }, 800);
+  });
 }
 
-// --- MCDU INIT A Page
-function renderMCDUInitA() {
-  const c = document.getElementById('mcdu-content');
-  c.innerHTML = `
-    <table><tr><td>FROM/TO:</td><td>${state.mcduInitA.fromTo || '&mdash;'}</td></tr>
-      <tr><td>FLIGHT NO:</td><td>${state.mcduInitA.flightNumber || '&mdash;'}</td></tr>
-      <tr><td>COST INDEX:</td><td>${state.mcduInitA.costIndex || '&mdash;'}</td></tr>
-      <tr><td>CRZ FL:</td><td>${state.mcduInitA.crzFL || '&mdash;'}</td></tr>
-      <tr><td>TEMP:</td><td>${state.mcduInitA.temperature || '&mdash;'}</td></tr>
-      <tr><td>WIND:</td><td>${state.mcduInitA.wind || '&mdash;'}</td></tr>
-    </table>
-    <input type="text" id="init-a-inp" placeholder="LSZH/EGLL, EZY123..." size="18">
-    <button id="init-a-cnf">Enter</button>
-  `;
-  setTimeout(() => {
-    document.getElementById('init-a-cnf')?.onclick = () => {
-      const val = document.getElementById('init-a-inp').value.trim();
-      if (val.match(/^[A-Z]{4}\/[A-Z]{4}/)) {
-        state.mcduInitA.fromTo = val.toUpperCase();
-      } else if (/^\d+$/.test(val)) {
-        state.mcduInitA.costIndex = val;
-      } else if (/^[A-Z]{3,4}\d{1,4}$/i.test(val)) {
-        state.mcduInitA.flightNumber = val;
-      } else if (/^FL\d+$/i.test(val)) {
-        state.mcduInitA.crzFL = val;
-      } else if (/^-?\d+[A-Z]?$/.test(val)) {
-        state.mcduInitA.temperature = val;
-      } else if (/^\d+\/\d+$/i.test(val)) {
-        state.mcduInitA.wind = val;
-      }
-      renderMCDUInitA();
-    }
-  }, 0);
-}
+/* ---- AUTOPILOT WITH LNAV/VNAV ---- */
 
-// --- MCDU F-PLAN Page
-function renderMCDUFPlan() {
-  const c = document.getElementById('mcdu-content');
-  const wps = state.mcduFPlan.waypoints.length ? state.mcduFPlan.waypoints.map((wp,i)=>
-    `<li>${wp.id || ('+'+i)} <b>(${wp.lat.toFixed(2)},${wp.lon.toFixed(2)})</b></li>`).join('') : "<li>No waypoints loaded</li>";
-  c.innerHTML = `
-    <div><b>Waypoints</b> <ol>${wps}</ol></div>
-    <input type="text" id="fplan-inp" placeholder="WPT123, etc" size="8">
-    <input type="text" id="fplan-lat" placeholder="Lat" size="6">
-    <input type="text" id="fplan-lon" placeholder="Lon" size="6">
-    <button id="fplan-add">Add</button>
-    <button id="fplan-clear">Clear</button>
-  `;
-  setTimeout(() => {
-    document.getElementById('fplan-add')?.onclick = () => {
-      const wp = document.getElementById('fplan-inp').value || `WPT${state.mcduFPlan.waypoints.length}`;
-      let lat = parseFloat(document.getElementById('fplan-lat').value);
-      let lon = parseFloat(document.getElementById('fplan-lon').value);
-      if(Number.isFinite(lat) && Number.isFinite(lon)) {
-        state.mcduFPlan.waypoints.push({ id: wp, lat, lon });
-        renderMCDUFPlan();
-      }
-    };
-    document.getElementById('fplan-clear')?.onclick = () => {
-      state.mcduFPlan.waypoints = [];
-      renderMCDUFPlan();
-    }
-  },0);
-}
-
-// --- MCDU PERF Page
-function renderMCDUPerf() {
-  // Only show takeoff as minimal demo, could page climb/cruise/approach via more tabs
-  const c = document.getElementById('mcdu-content');
-  const p = state.mcduPerf.takeoff;
-  c.innerHTML = `
-    <table>
-      <tr><td>V1</td><td>${p.v1||'—'}</td></tr>
-      <tr><td>VR</td><td>${p.vr||'—'}</td></tr>
-      <tr><td>V2</td><td>${p.v2||'—'}</td></tr>
-      <tr><td>FLAPS</td><td>${p.flapSetting||'—'}</td></tr>
-      <tr><td>FLEX TEMP</td><td>${p.flexTemp||'—'}</td></tr>
-      <tr><td>THR RED</td><td>${p.thrRed||'—'}</td></tr>
-      <tr><td>ACCEL ALT</td><td>${p.accelAlt||'—'}</td></tr>
-      <tr><td>ENG OUT ACC</td><td>${p.engOutAccel||'—'}</td></tr>
-    </table>
-    <input type="text" id="perf-inp" placeholder="ENTER VALUE / FIELD" size="14">
-    <button id="perf-cnf">Set</button>
-  `;
-  setTimeout(() => {
-    document.getElementById('perf-cnf')?.onclick = () => {
-      const val = document.getElementById('perf-inp').value.trim();
-      if (!val) return;
-      if (/^v1=\d+$/i.test(val)) p.v1 = val.slice(3);
-      else if (/^vr=\d+$/i.test(val)) p.vr = val.slice(3);
-      else if (/^v2=\d+$/i.test(val)) p.v2 = val.slice(3);
-      else if (/^flaps?=\S+$/i.test(val)) p.flapSetting = val.split('=')[1];
-      else if (/^flex=?\S+$/i.test(val)) p.flexTemp = val.split('=')[1];
-      else if (/^thrr?ed=?\S+$/i.test(val)) p.thrRed = val.split('=')[1];
-      else if (/^acc(el)?=?\S+$/i.test(val)) p.accelAlt = val.split('=')[1];
-      else if (/^engout(acc)?=?\S+$/i.test(val)) p.engOutAccel = val.split('=')[1];
-      renderMCDUPerf();
-    }
-  }, 0);
-}
-
-// --- ATC Panel (simple recent message log)
-function renderATCPanel() {
-  const c = document.getElementById('atc-panel');
-  if (!c) return;
-  c.innerHTML = `
-    <div class='panel-title'>ATC Log</div>
-    <ol style="font-size:0.95em">
-      ${state.atcMessages.map(msg=>`<li>${msg.text}</li>`).join('')}
-    </ol>
-    <input type="text" id="atc-inp" placeholder="Type ATC request..." size="18">
-    <button id="atc-send">Send</button>
-  `;
-  setTimeout(() => {
-    document.getElementById('atc-send')?.onclick = () => {
-      const text = document.getElementById('atc-inp').value.trim();
-      if (text) atcVoiceStub(text);
-      renderATCPanel();
-    }
-  },0);
-}
-
-// --- All Panels at Once
-function renderAllUIPanels() {
-  renderOverheadPanel();
-  renderEnginePanel();
-  renderAutopilotPanel();
-  renderPFD();
-  renderND();
-  renderMCDU();
-  renderATCPanel();
-}
-
-// --------------- Main Simulation Loop ---------------------
-let mainLoopStarted = false;
-
-function mainLoop() {
-  // Simulate basic dynamic params
-  // For demo: bank up and down over time
-  state.pitch = 10*Math.sin(Date.now()/2000);
-  state.roll = 15*Math.sin(Date.now()/2500);
-  state.hdg_true += (state.autopilotMode !== 'manual' ? 0.2 : 0.05);
-  if (state.hdg_true > 360) state.hdg_true -= 360;
-
-  updateFuelBurn();
-
-  // Update UI
-  renderAllUIPanels();
-
-  // Update Leaflet map
-  if (state.leafletMap && state.ownLeafletMarker) {
-    state.ownLeafletMarker.setLatLng([state.position.lat, state.position.lon]);
-    state.leafletMap.panTo([state.position.lat, state.position.lon], { animate: false });
+function autopilotLogic(acft, dtSec) {
+  if (!acft.autopilot.enabled) return;
+  const ap = acft.autopilot;
+  const flt = acft.flight;
+  // Autopilot Heading
+  if (ap.lnav && acft.fms.flightPlan.length >= 2) {
+    // Active LNAV: Track to next waypoint
+    const pos = acft.fms.position;
+    const wp = acft.fms.flightPlan[pos+1];
+    if (!wp) return;
+    const hdgToWp = getHeadingBetween({ lat: flt.lat, lon: flt.lon }, wp);
+    const diff = ((hdgToWp - flt.hdg + 540)%360)-180;
+    flt.hdg = clamp(flt.hdg + diff*0.05, 0, 359); // Simple PID
+    // If close to WP, increment
+    if (getDistanceNM({lat: flt.lat, lon: flt.lon}, wp) < 2) acft.fms.position++;
   }
-
-  window.requestAnimationFrame(mainLoop);
-}
-
-// --------------- Initialization Bootstrap ---------------
-
-function bootstrapIFRSCockpitUI() {
-  // Attach canvases and panel DIVs
-  // Expected: user HTML has <div id='overhead-panel'> etc; <canvas id='pfd-canvas' width=270 height=200>
-  renderAllUIPanels();
-
-  // Bootstrap leaflet when loaded (must exist in HTML!)
-  if (window.L) setTimeout(initializeLeafletMap, 100);
-
-  if (!mainLoopStarted) {
-    mainLoopStarted = true;
-    mainLoop();
+  if (ap.vnav && acft.fms.flightPlan.length > acft.fms.position+1) {
+    // Climb/Descend to next waypoint altitude
+    const wp = acft.fms.flightPlan[acft.fms.position+1];
+    if (wp && wp.alt) {
+      const err = wp.alt - flt.altitude;
+      let vs;
+      if (Math.abs(err) < 30) vs = 0;
+      else vs = clamp(err/10, -1800, 2200);
+      flt.vs = vs;
+      flt.altitude += vs * dtSec / 60; // Convert fpm to feet per dt
+    }
+  } else {
+    // HDG/ALT/VS/SPD holds
+    flt.hdg = clamp(ap.heading, 0, 359);
+    if (flt.altitude !== ap.altSel) {
+      const diff = ap.altSel - flt.altitude;
+      const vs = clamp(diff/10, -1800, 2200);
+      flt.altitude += vs * dtSec / 60;
+      flt.vs = vs;
+    } else {
+      flt.vs = 0;
+    }
+  }
+  // Airspeed hold
+  if (ap.speedSel && ap.speedSel > 79) {
+    flt.ias += clamp(ap.speedSel - flt.ias, -3, 3);
   }
 }
 
-document.addEventListener('DOMContentLoaded', bootstrapIFRSCockpitUI);
+/* ---- FUEL BURN UPDATER ---- */
+
+function updateFuel(acft, dtSec) {
+  let totalBurn = 0;
+  acft.engines.forEach((e, idx) => {
+    // Update EGT, N1/N2 simulation, and fuel
+    if (e.master && acft.overhead.fuelPumps) {
+      e.n1 = clamp(e.n1 + (100-e.n1)*0.1, 0, 100);
+      e.n2 = clamp(e.n2 + (90-e.n2)*0.08, 0, 90);
+      e.egt = clamp(e.egt + 350*0.05, 0, 650);
+      e.running = true;
+    } else {
+      e.n1 = clamp(e.n1 - 2, 0, 100);
+      e.n2 = clamp(e.n2 - 1, 0, 90);
+      e.egt = clamp(e.egt - 40, 0, 650);
+      e.running = false;
+    }
+    e.fuelFlow = computeFuelBurn(e);
+    totalBurn += e.fuelFlow;
+  });
+  const fuelUsed = totalBurn * (dtSec / 3600);
+  acft.fuel.quantity = Math.max(acft.fuel.quantity - fuelUsed, 0);
+  acft.fuel.burnRate = totalBurn;
+}
+
+/* ---- MAIN RENDER FUNCTION ---- */
+// Gather UI elements at startup for efficiency
+const ui = {};
+function setupUIRefs() {
+  ui.oh = document.getElementById("overhead");
+  ui.eng = document.getElementById("engine");
+  ui.ap = document.getElementById("autopilot");
+  ui.pfd = document.getElementById("pfd");
+  ui.nd = document.getElementById("nd");
+  ui.map = document.getElementById("leaflet");
+  ui.mcdu = document.getElementById("mcdu");
+  ui.atc = document.getElementById("atc");
+  ui.coldDarkBtn = document.getElementById("cold-dark");
+  ui.startupBtn = document.getElementById("startup-seq");
+}
+
+/* ---- MAIN SUBSCRIBER ---- */
+
+subscribe(st => {
+  const ac = st.aircraft;
+  if (ui.oh) renderOverheadPanel(ui.oh, ac.overhead);
+  if (ui.eng) renderEnginePanel(ui.eng, ac.overhead, ac.engines, ac.fuel);
+  if (ui.ap) renderAutopilotPanel(ui.ap, ac.autopilot, ac.fms);
+  if (ui.pfd) renderPFD(ui.pfd, ac.flight, ac.autopilot);
+  if (ui.nd) renderND(ui.nd, ac.flight, ac.fms, ac.autopilot);
+  if (ui.map) renderLeafletMap(ui.map, ac.flight, ac.fms);
+  if (ui.mcdu) renderMCDU(ui.mcdu, ac.mcdu, ac.fms);
+  if (ui.atc) renderATCStub(ui.atc, ac.atc);
+});
+
+/* ---- EVENT HANDLING SECTION ---- */
+
+document.addEventListener("DOMContentLoaded", function() {
+  setupUIRefs();
+
+  // Cold & Dark / Startup
+  if (ui.coldDarkBtn) ui.coldDarkBtn.onclick = () => coldAndDarkStart();
+  if (ui.startupBtn) ui.startupBtn.onclick = () => startupPowerFlow();
+
+  // Overhead Panel
+  ui.oh.addEventListener("click", function(ev) {
+    if (ev.target.id === "battery-btn") {
+      setState(s => s.aircraft.overhead.battery = !s.aircraft.overhead.battery);
+    } else if (ev.target.id === "extpower-btn") {
+      setState(s => s.aircraft.overhead.externalPower = !s.aircraft.overhead.externalPower);
+    } else if (ev.target.id === "apu-btn") {
+      setState(s => s.aircraft.overhead.apuOn = !s.aircraft.overhead.apuOn);
+      setTimeout(() =>
+        setState(s => s.aircraft.overhead.apuAvailable = s.aircraft.overhead.apuOn), 800);
+    }
+  });
+  ui.oh.addEventListener("change", function(ev) {
+    if (ev.target.id === "fuelPumps-btn") {
+      setState(s => s.aircraft.overhead.fuelPumps = ev.target.checked);
+    } else if (ev.target.id === "hydraulics-btn") {
+      setState(s => s.aircraft.overhead.hydraulics = ev.target.checked);
+    } else if (ev.target.className === "light-btn") {
+      const k = ev.target.dataset.light;
+      setState(s => s.aircraft.overhead.lights[k] = ev.target.checked);
+    } else if (ev.target.id === "ac-btn") {
+      setState(s => s.aircraft.overhead.airConditioning = ev.target.checked);
+    }
+  });
+
+  // Engine Panel
+  ui.eng.addEventListener("click", function(ev) {
+    if (ev.target.id && ev.target.id.startsWith("eng-master-")) {
+      const idx = parseInt(ev.target.id.slice(-1));
+      setState(s => s.aircraft.engines[idx].master = !s.aircraft.engines[idx].master);
+    }
+  });
+
+  // Autopilot Panel
+  ui.ap.addEventListener("click", function(ev) {
+    if (ev.target.id === "ap-onoff") {
+      setState(s => s.aircraft.autopilot.enabled = !s.aircraft.autopilot.enabled);
+    }
+  });
+  ui.ap.addEventListener("change", function(ev) {
+    if (ev.target.id === "ap-lnav") {
+      setState(s => s.aircraft.autopilot.lnav = ev.target.checked);
+      setState(s => s.aircraft.autopilot.mode = ev.target.checked ? "LNAV" : "HDG");
+    }
+    if (ev.target.id === "ap-vnav") {
+      setState(s => s.aircraft.autopilot.vnav = ev.target.checked);
+      setState(s => s.aircraft.autopilot.mode = ev.target.checked ? "VNAV" : s.aircraft.autopilot.mode);
+    }
+    if (ev.target.id === "ap-hdg") {
+      setState(s => s.aircraft.autopilot.heading = clamp(Number(ev.target.value) || 0, 0, 359));
+    }
+    if (ev.target.id === "ap-alt") {
+      setState(s => s.aircraft.autopilot.altSel = clamp(Number(ev.target.value)||0, 0, 45000));
+    }
+    if (ev.target.id === "ap-spd") {
+      setState(s => s.aircraft.autopilot.speedSel = clamp(Number(ev.target.value)||180, 80, 500));
+    }
+    if (ev.target.id === "ap-vs") {
+      setState(s => s.aircraft.autopilot.vsSel = clamp(Number(ev.target.value)||0, -8000, 8000));
+    }
+  });
+
+  // MCDU Panel
+  ui.mcdu.addEventListener("click", function(ev) {
+    if (ev.target.classList.contains("key")) {
+      // Scratchpad entry logic
+      const k = ev.target.dataset.key;
+      setState(s => {
+        let sp = s.aircraft.mcdu.scratchpad || "";
+        if (k === "CLR") sp = ""; else if (k === "EXEC") {}; else sp += k;
+        s.aircraft.mcdu.scratchpad = sp;
+      });
+    }
+    if (ev.target.classList.contains("page")) {
+      setState(s => s.aircraft.mcdu.page = ev.target.dataset.page === "INIT" ? "INITA" : ev.target.dataset.page);
+    }
+  });
+
+  // ATC Panel
+  ui.atc.addEventListener("click", function(ev) {
+    if (ev.target.id === "atc-contact-btn") {
+      setState(s => s.aircraft.atc.lastMessage = "ATC contact acknowledged (stub)");
+    }
+  });
+});
+
+/* ---- MAIN LOOP ---- */
+
+// Time tracking for deltaTime updates
+let lastTick = performance.now();
+
+function mainLoop(now = performance.now()) {
+  const acft = state.aircraft;
+  const dt = (now - lastTick) / 1000.0;
+  lastTick = now;
+  // Only if powered up
+  if (acft.overhead.battery || acft.overhead.externalPower || acft.overhead.apuOn) {
+    // Main simulation steps
+    autopilotLogic(acft, dt);
+    updateFuel(acft, dt);
+  }
+  // Aircraft movement: crude for demo
+  if (acft.autopilot.enabled) {
+    // Drift along heading at 250 kts (simulate GS)
+    const pos = moveAircraft(acft.flight.lat, acft.flight.lon, acft.flight.hdg, (acft.flight.gs || 2.5) * dt / 3600);
+    acft.flight.lat = pos.lat;
+    acft.flight.lon = pos.lon;
+  }
+  notify();
+  requestAnimationFrame(mainLoop);
+}
+
+// Initial Cold & Dark state
+coldAndDarkStart();
+
+// Start main loop
+mainLoop();
